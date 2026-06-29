@@ -88,9 +88,17 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
           clearInterval(poll)
           activePolls.current.delete(logId)
           updateLog(logId, { status: 'error', detail: log.error ?? 'Sync failed' })
-        } else if (log.tracks_downloaded !== undefined) {
-          // Update progress count in the log label
-          updateLog(logId, { name: `Sync: ${displayName} (${log.tracks_downloaded} downloaded)` })
+        } else {
+          // Show phase-appropriate progress
+          let progress: string
+          if (log.tracks_found === -1 || log.tracks_found === 0) {
+            progress = 'Searching...'
+          } else if (log.tracks_downloaded === 0) {
+            progress = `Found ${log.tracks_found} · starting downloads`
+          } else {
+            progress = `${log.tracks_downloaded}/${log.tracks_found} downloaded`
+          }
+          updateLog(logId, { name: `Sync: ${displayName} · ${progress}` })
         }
       } catch {
         clearInterval(poll)

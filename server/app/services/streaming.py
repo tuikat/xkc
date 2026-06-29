@@ -1,6 +1,10 @@
 """Streaming sync service. Downloads tracks from Spotify/SoundCloud/YouTube."""
 import logging
+import os
+import re
 import subprocess
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +13,9 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.opus', '.ogg', '.wav', '.aiff'}
+
+# Strip ANSI escape codes and carriage returns from terminal output
+_ANSI = re.compile(r'(\x9B|\x1B\[)[0-9:;<=>?]*[ -/]*[@-~]|\x1B[PX^_].*?\x1B\\|\x1B[@-_]|\x07|\r')
 
 
 def sync_source(source_id: str, db_url: str, data_dir: str, log_id: str):
@@ -67,12 +74,14 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
     """Download Spotify playlist using spotdl, then scan and import new files."""
     from app.models import Track
 
-    # Snapshot file paths already in DB so we can detect new downloads
     existing_paths = {
         row[0] for row in db.query(Track.file_path).filter(Track.file_path.isnot(None)).all()
     }
 
-    log.tracks_found = -1  # will be updated after scan
+    # -1 = "searching" phase (no count yet); frontend shows "Searching..."
+    log.tracks_found = -1
+    log.tracks_downloaded = 0
+    log.tracks_skipped = 0
     db.commit()
 
     quality = source.download_quality or 'best'
@@ -80,45 +89,102 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
     bitrate = '320k' if quality != 'low' else '128k'
     output_tmpl = str(tracks_dir / '{artists} - {title}.{output-ext}')
 
-    logger.info(f"Starting spotdl download for {source.source_url}")
-    try:
-        subprocess.run(
-            [
-                'spotdl', 'download', source.source_url,
-                '--output', output_tmpl,
-                '--format', fmt,
-                '--bitrate', bitrate,
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=7200,  # 2 hours — large playlists take a long time
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning("spotdl download timed out after 2 hours — importing whatever downloaded so far")
-    except FileNotFoundError:
-        raise RuntimeError("spotdl not found. Is it installed?")
+    env = os.environ.copy()
+    env['NO_COLOR'] = '1'   # disable Rich colours → plain text output
+    env['TERM'] = 'dumb'
+    env['PYTHONUNBUFFERED'] = '1'
 
-    # Scan tracks_dir for files that weren't there before
+    logger.info(f"Starting spotdl download for {source.source_url}")
+    proc = subprocess.Popen(
+        [
+            'spotdl', 'download', source.source_url,
+            '--output', output_tmpl,
+            '--format', fmt,
+            '--bitrate', bitrate,
+            '--download-threads', '5',  # parallel downloads
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,   # merge stderr so we see all output
+        stdin=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+
+    # Read output in a background thread (drains the pipe so it never deadlocks)
+    dl_count = [0]
+    sk_count = [0]
+    last_flush = [time.time()]
+
+    def _read_output():
+        for raw in proc.stdout:
+            line = _ANSI.sub('', raw).strip()
+            if not line:
+                continue
+
+            low = line.lower()
+
+            # "Found 3442 songs in Playlist" — set total track count
+            if log.tracks_found == -1 and 'found' in low and 'song' in low:
+                m = re.search(r'found\s+(\d[\d,]*)\s+song', low)
+                if m:
+                    log.tracks_found = int(m.group(1).replace(',', ''))
+
+            # Downloaded / skipped lines — increment counters
+            if 'downloaded' in low or '✔' in line or '✓' in line:
+                dl_count[0] += 1
+            elif 'skip' in low or 'already' in low:
+                sk_count[0] += 1
+
+            # Commit to DB at most every 4 seconds
+            now = time.time()
+            if now - last_flush[0] >= 4:
+                log.tracks_downloaded = dl_count[0]
+                log.tracks_skipped = sk_count[0]
+                try:
+                    db.commit()
+                except Exception:
+                    pass
+                last_flush[0] = now
+
+    reader = threading.Thread(target=_read_output, daemon=True)
+    reader.start()
+
+    try:
+        proc.wait(timeout=7200)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        logger.warning("spotdl timed out after 2 hours — importing whatever was downloaded")
+    finally:
+        reader.join(timeout=15)
+
+    # Final commit of spotdl counts before we move to the import phase
+    log.tracks_downloaded = dl_count[0]
+    log.tracks_skipped = sk_count[0]
+    db.commit()
+
+    # Scan filesystem for new files and import them into our library
     new_files = [
         f for f in tracks_dir.iterdir()
         if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS and str(f) not in existing_paths
     ]
+    logger.info(f"spotdl finished. {len(new_files)} new files to import.")
 
-    logger.info(f"spotdl finished. Found {len(new_files)} new files to import.")
-    log.tracks_found = len(new_files)
-    db.commit()
+    # Update tracks_found with the actual file count (in case parsing missed the "Found N" line)
+    if log.tracks_found < 0 or log.tracks_found < len(new_files):
+        log.tracks_found = len(new_files)
 
-    downloaded = 0
-    skipped = 0
+    imported = 0
+    skipped_import = 0
     for track_file in new_files:
         result = _import_file(track_file, source, db, data_dir, db_url, mirror_playlist)
         if result == 'imported':
-            downloaded += 1
+            imported += 1
         else:
-            skipped += 1
-        log.tracks_downloaded = downloaded
-        log.tracks_skipped = skipped
+            skipped_import += 1
+        log.tracks_downloaded = imported
+        log.tracks_skipped = skipped_import
         db.commit()
 
 

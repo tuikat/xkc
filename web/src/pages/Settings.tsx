@@ -135,6 +135,13 @@ function StreamingTab() {
           } else if (job.status === 'failed') {
             clearInterval(poll)
             updateLog(logId, { status: 'error', detail: job.error ?? 'Sync failed' })
+          } else {
+            const n = name
+            let progress: string
+            if (job.tracks_found === -1 || job.tracks_found === 0) progress = 'Searching...'
+            else if (job.tracks_downloaded === 0) progress = `Found ${job.tracks_found} · starting downloads`
+            else progress = `${job.tracks_downloaded}/${job.tracks_found} downloaded`
+            updateLog(logId, { name: `Sync: ${n} · ${progress}` })
           }
         } catch { clearInterval(poll); updateLog(logId, { status: 'error', detail: 'Status check failed' }) }
       }, 4000)
