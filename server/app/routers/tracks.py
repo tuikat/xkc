@@ -125,6 +125,22 @@ def _run_analysis(track_id: str, file_path: str):
         asyncio.run(notify_ws(track_id, {"state": "failed", "error": str(e)}))
 
 
+@router.get("/genres")
+def get_genres(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(get_current_user),
+):
+    """Return all distinct genre values across the library."""
+    rows = db.query(models.Track.genre).filter(models.Track.genre.isnot(None)).all()
+    seen: set[str] = set()
+    for (genre_str,) in rows:
+        for g in genre_str.split(','):
+            g = g.strip()
+            if g:
+                seen.add(g)
+    return sorted(seen, key=str.lower)
+
+
 @router.get("/", response_model=List[dict])
 def search_tracks(
     q: Optional[str] = Query(None),

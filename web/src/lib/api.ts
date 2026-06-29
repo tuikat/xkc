@@ -170,6 +170,7 @@ export const api = {
       req<void>(`/api/tracks/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag_ids: tagIds }) }),
     reanalyze: (id: string) =>
       req<void>(`/api/tracks/${id}/reanalyze`, { method: 'POST' }),
+    getGenres: () => req<string[]>('/api/tracks/genres'),
     updateBeats: (id: string, data: { offset_ms?: number; beat_positions_ms?: number[] }) =>
       req<{ beat_positions_ms: number[] }>(`/api/tracks/${id}/beats`, { method: 'PATCH', body: JSON.stringify(data) }),
     getStreamUrl: (id: string) => `/api/tracks/${id}/stream`,

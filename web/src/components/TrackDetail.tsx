@@ -41,6 +41,12 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
     queryFn: () => api.tracks.getTrack(trackId),
   })
 
+  const { data: allGenres = [] } = useQuery({
+    queryKey: ['genres'],
+    queryFn: api.tracks.getGenres,
+    staleTime: 60_000,
+  })
+
   const [editData, setEditData] = useState<Partial<Track>>({})
   const [isDirty, setIsDirty] = useState(false)
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
@@ -305,19 +311,27 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
                 </span>
               ))}
               {addingGenre && (
-                <input
-                  autoFocus
-                  value={genreInput}
-                  onChange={e => setGenreInput(e.target.value)}
-                  onBlur={() => { if (genreInput.trim()) addGenreChip(genreInput); else setAddingGenre(false) }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') addGenreChip(genreInput)
-                    if (e.key === 'Escape') { setAddingGenre(false); setGenreInput('') }
-                    e.stopPropagation()
-                  }}
-                  placeholder="Genre name"
-                  className="text-xs px-2 py-0.5 rounded-full border border-xkc-accent bg-xkc-bg text-xkc-text focus:outline-none w-24"
-                />
+                <>
+                  <datalist id="genre-suggestions">
+                    {allGenres.filter(g => !genreChips.some(c => c.toLowerCase() === g.toLowerCase())).map(g => (
+                      <option key={g} value={g} />
+                    ))}
+                  </datalist>
+                  <input
+                    autoFocus
+                    list="genre-suggestions"
+                    value={genreInput}
+                    onChange={e => setGenreInput(e.target.value)}
+                    onBlur={() => { if (genreInput.trim()) addGenreChip(genreInput); else setAddingGenre(false) }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') addGenreChip(genreInput)
+                      if (e.key === 'Escape') { setAddingGenre(false); setGenreInput('') }
+                      e.stopPropagation()
+                    }}
+                    placeholder="Genre name"
+                    className="text-xs px-2 py-0.5 rounded-full border border-xkc-accent bg-xkc-bg text-xkc-text focus:outline-none w-24"
+                  />
+                </>
               )}
               {genreChips.length === 0 && !addingGenre && (
                 <button

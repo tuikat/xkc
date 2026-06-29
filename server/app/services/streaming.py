@@ -133,13 +133,15 @@ def _add_to_playlist(track_id: str, playlist_id: str, db):
 def _fetch_spotify_tracklist(url: str) -> list:
     """Use spotdl to list tracks without downloading."""
     tmp_file = '/tmp/spotdl_list.spotdl'
+    # Delete stale file so a timeout can't cause us to read old data
+    Path(tmp_file).unlink(missing_ok=True)
     try:
         result = subprocess.run(
             ['spotdl', 'save', url, '--save-file', tmp_file],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=180
+            timeout=3600,  # 1 hour — large playlists (3000+ songs) take 15-30 min
         )
         if result.returncode != 0:
             logger.error(f"spotdl save exited {result.returncode}")
