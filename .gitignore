@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+.venv/
+venv/
+*.egg
+dist/
+build/
+
+# Node
+node_modules/
+.npm
+*.tsbuildinfo
+
+# Vite / build output
+web/dist/
+desktop/dist/
+server/static/
+
+# Tauri
+desktop/src-tauri/target/
+desktop/gen/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data (never commit)
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Temp
+tmp/
+temp/
