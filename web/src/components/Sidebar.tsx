@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import type { Playlist, TagGroup, StreamSource } from '../lib/api'
 import { Plus, ChevronDown, ChevronRight, Music, RefreshCw, Radio, X } from 'lucide-react'
 import { cn, hexColor } from '../lib/utils'
+import { useStore } from '../lib/store'
 
 interface SidebarProps {
   selectedPlaylistId: string | null
@@ -17,6 +18,7 @@ const BLANK_SOURCE: NewSource = { display_name: '', service: 'soundcloud', sourc
 
 export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selectedTagIds, onTagSelect }: SidebarProps) {
   const qc = useQueryClient()
+  const { addLog, updateLog } = useStore()
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [addingPlaylist, setAddingPlaylist] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(true)
@@ -64,6 +66,24 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
 
   const syncSource = useMutation({
     mutationFn: (id: string) => api.streamSources.syncSource(id),
+    onSuccess: (data, sourceId) => {
+      const src = sources.find(s => s.id === sourceId)
+      const logId = data.job_id
+      addLog({ id: logId, name: `Sync: ${src?.display_name ?? 'Stream source'}`, status: 'uploading', ts: Date.now() })
+      const poll = setInterval(async () => {
+        try {
+          const job = await api.streamSources.getSyncJobStatus(logId)
+          if (job.status === 'complete') {
+            clearInterval(poll)
+            updateLog(logId, { status: 'complete', detail: `${job.tracks_downloaded ?? 0} downloaded, ${job.tracks_skipped ?? 0} skipped` })
+            qc.invalidateQueries({ queryKey: ['tracks'] })
+          } else if (job.status === 'failed') {
+            clearInterval(poll)
+            updateLog(logId, { status: 'error', detail: job.error ?? 'Sync failed' })
+          }
+        } catch { clearInterval(poll); updateLog(logId, { status: 'error', detail: 'Status check failed' }) }
+      }, 3000)
+    },
   })
 
   const createSource = useMutation({

@@ -256,6 +256,8 @@ export const api = {
     deleteSource: (id: string) => req<void>(`/api/stream-sources/${id}`, { method: 'DELETE' }),
     syncSource: (id: string) =>
       req<{ job_id: string }>(`/api/stream-sources/${id}/sync`, { method: 'POST' }),
+    getSyncJobStatus: (jobId: string) =>
+      req<{ status: string; error?: string; tracks_downloaded?: number; tracks_skipped?: number; tracks_found?: number }>(`/api/stream-sources/jobs/${jobId}`),
   },
 
   export: {

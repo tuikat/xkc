@@ -330,8 +330,8 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
             </div>
           </div>
 
-          {/* Real tag groups */}
-          {tagGroups.map(group => (
+          {/* Real tag groups — skip any named "genre" since we handle it above */}
+          {tagGroups.filter(g => g.name.toLowerCase() !== 'genre').map(group => (
             <div key={group.id} className="mb-3">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs text-xkc-muted">{group.name}</span>

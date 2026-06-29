@@ -18,21 +18,18 @@ _jobs_lock = threading.Lock()
 
 def _run_sync(job_id: str, source_id: str):
     from app.services.streaming import sync_source
-    from app.database import SessionLocal
-    db = SessionLocal()
+    from app.database import get_db_url
     try:
         with _jobs_lock:
             _sync_jobs[job_id] = {"status": "running", "source_id": source_id}
         settings = get_settings()
-        sync_source(source_id, db, settings)
+        sync_source(source_id, get_db_url(), settings.data_dir)
         with _jobs_lock:
             _sync_jobs[job_id]["status"] = "complete"
     except Exception as e:
         with _jobs_lock:
             _sync_jobs[job_id]["status"] = "failed"
             _sync_jobs[job_id]["error"] = str(e)
-    finally:
-        db.close()
 
 
 @router.get("/", response_model=List[StreamSourceOut])
@@ -147,6 +144,28 @@ def delete_source(
         raise HTTPException(status_code=404, detail="Stream source not found")
     db.delete(source)
     db.commit()
+
+
+@router.get("/jobs/{job_id}")
+def get_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    with _jobs_lock:
+        job = _sync_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # Attach latest log detail when complete
+    if job["status"] == "complete":
+        source_id = job.get("source_id")
+        if source_id:
+            log = db.query(models.StreamSyncLog).filter(
+                models.StreamSyncLog.source_id == source_id
+            ).order_by(models.StreamSyncLog.started_at.desc()).first()
+            if log:
+                return {**job, "tracks_downloaded": log.tracks_downloaded, "tracks_skipped": log.tracks_skipped, "tracks_found": log.tracks_found}
+    return job
 
 
 @router.post("/{source_id}/sync")

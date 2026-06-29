@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { StreamSource } from '../lib/api'
 import { ArrowLeft, Plus, Trash2, RefreshCw, Download } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { useStore } from '../lib/store'
 
 type Tab = 'general' | 'streaming' | 'export' | 'import'
 
@@ -104,6 +105,7 @@ function GeneralTab() {
 
 function StreamingTab() {
   const qc = useQueryClient()
+  const { addLog, updateLog } = useStore()
   const { data: sources = [] } = useQuery({ queryKey: ['streamSources'], queryFn: api.streamSources.getSources })
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ service: 'spotify', display_name: '', source_url: '', sync_mode: 'master_only', auto_sync: false })
@@ -116,7 +118,27 @@ function StreamingTab() {
     mutationFn: api.streamSources.deleteSource,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['streamSources'] }),
   })
-  const syncSource = useMutation({ mutationFn: api.streamSources.syncSource })
+  const syncSource = useMutation({
+    mutationFn: api.streamSources.syncSource,
+    onSuccess: (data, sourceId) => {
+      const src = sources.find(s => s.id === sourceId)
+      const logId = data.job_id
+      addLog({ id: logId, name: `Sync: ${src?.display_name ?? 'Stream source'}`, status: 'uploading', ts: Date.now() })
+      const poll = setInterval(async () => {
+        try {
+          const job = await api.streamSources.getSyncJobStatus(logId)
+          if (job.status === 'complete') {
+            clearInterval(poll)
+            updateLog(logId, { status: 'complete', detail: `${job.tracks_downloaded ?? 0} downloaded, ${job.tracks_skipped ?? 0} skipped` })
+            qc.invalidateQueries({ queryKey: ['tracks'] })
+          } else if (job.status === 'failed') {
+            clearInterval(poll)
+            updateLog(logId, { status: 'error', detail: job.error ?? 'Sync failed' })
+          }
+        } catch { clearInterval(poll); updateLog(logId, { status: 'error', detail: 'Status check failed' }) }
+      }, 3000)
+    },
+  })
 
   return (
     <div className="space-y-4">
