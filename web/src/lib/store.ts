@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { User } from './api'
+import type { User, Track } from './api'
 
 interface UploadItem {
   id: string
@@ -51,6 +51,11 @@ interface AppState {
   addLog: (entry: LogEntry) => void
   updateLog: (id: string, update: Partial<LogEntry>) => void
   clearLog: () => void
+
+  playerTrack: Track | null
+  playerExpanded: boolean
+  setPlayerTrack: (track: Track | null) => void
+  setPlayerExpanded: (v: boolean) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -94,4 +99,9 @@ export const useStore = create<AppState>((set) => ({
   updateLog: (id, update) =>
     set((s) => ({ log: s.log.map((e) => (e.id === id ? { ...e, ...update } : e)) })),
   clearLog: () => set({ log: [] }),
+
+  playerTrack: null,
+  playerExpanded: false,
+  setPlayerTrack: (track) => set({ playerTrack: track, playerExpanded: track !== null }),
+  setPlayerExpanded: (v) => set({ playerExpanded: v }),
 }))

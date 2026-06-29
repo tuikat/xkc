@@ -8,6 +8,7 @@ import TrackTable from '../components/TrackTable'
 import TrackDetail from '../components/TrackDetail'
 import UploadZone from '../components/UploadZone'
 import ActivityLog from '../components/ActivityLog'
+import Player from '../components/Player'
 import { Search, Upload, Settings, Users, LogOut, Download, ChevronDown, X, SlidersHorizontal } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -220,7 +221,7 @@ export default function Library() {
         )}
 
         {/* Main layout */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
           <Sidebar
             selectedPlaylistId={selectedPlaylistId}
             onPlaylistSelect={setSelectedPlaylistId}
@@ -310,6 +311,9 @@ export default function Library() {
           </div>
         )}
       </div>
+
+      {/* Waveform player — docked at bottom */}
+      <Player />
 
       <style>{`
         .menu-item {

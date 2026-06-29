@@ -103,23 +103,26 @@ def extract_artwork(filepath: str, track_id: str, data_dir: str) -> Optional[str
 
 
 def _run_analysis(track_id: str, file_path: str):
-    """Run in thread pool."""
+    """Run in thread pool. audio.py creates its own DB session."""
     from app.services.audio import analyze_track_background
-    from app.database import SessionLocal
-    db = SessionLocal()
+    from app.database import get_db_url
+    settings = get_settings()
     try:
         asyncio.run(notify_ws(track_id, {"state": "analyzing", "step": "starting"}))
-        analyze_track_background(track_id, file_path, db)
+        analyze_track_background(track_id, file_path, settings.data_dir, get_db_url())
         asyncio.run(notify_ws(track_id, {"state": "complete"}))
     except Exception as e:
-        track = db.query(models.Track).filter(models.Track.id == track_id).first()
-        if track:
-            track.analysis_state = "failed"
-            track.analysis_error = str(e)
-            db.commit()
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            track = db.query(models.Track).filter(models.Track.id == track_id).first()
+            if track:
+                track.analysis_state = "failed"
+                track.analysis_error = str(e)
+                db.commit()
+        finally:
+            db.close()
         asyncio.run(notify_ws(track_id, {"state": "failed", "error": str(e)}))
-    finally:
-        db.close()
 
 
 @router.get("/", response_model=List[dict])
@@ -320,6 +323,28 @@ def get_artwork(
     return FileResponse(track.artwork_path, media_type="image/jpeg")
 
 
+_AUDIO_MIME = {
+    ".mp3": "audio/mpeg", ".flac": "audio/flac", ".wav": "audio/wav",
+    ".aiff": "audio/aiff", ".aif": "audio/aiff", ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg", ".opus": "audio/opus", ".aac": "audio/aac",
+}
+
+@router.get("/{track_id}/stream")
+def stream_track(
+    track_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    track = db.query(models.Track).filter(models.Track.id == track_id).first()
+    if not track:
+        raise HTTPException(status_code=404, detail="Track not found")
+    path = Path(track.file_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    mime = _AUDIO_MIME.get(path.suffix.lower(), "audio/mpeg")
+    return FileResponse(str(path), media_type=mime, headers={"Accept-Ranges": "bytes"})
+
+
 @router.get("/{track_id}/waveform")
 def get_waveform(
     track_id: str,
@@ -328,23 +353,24 @@ def get_waveform(
 ):
     beat = db.query(models.Beat).filter(models.Beat.track_id == track_id).first()
     if not beat:
-        return {"overview": [], "detail": []}
-    import zlib
-    overview = []
-    detail = []
+        return {"overview": [], "detail": [], "beat_times_ms": []}
+    import zlib, json as _json
+    overview, detail = [], []
     if beat.waveform_overview:
         try:
-            import json as _json
             overview = _json.loads(zlib.decompress(beat.waveform_overview))
         except Exception:
             pass
     if beat.waveform_detail:
         try:
-            import json as _json
             detail = _json.loads(zlib.decompress(beat.waveform_detail))
         except Exception:
             pass
-    return {"overview": overview, "detail": detail}
+    return {
+        "overview": overview,
+        "detail": detail,
+        "beat_times_ms": beat.beat_positions_ms or [],
+    }
 
 
 @router.post("/{track_id}/cues", response_model=CueOut, status_code=status.HTTP_201_CREATED)

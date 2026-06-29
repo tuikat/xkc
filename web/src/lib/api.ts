@@ -158,8 +158,6 @@ export const api = {
     updateTrack: (id: string, data: Partial<Track>) =>
       req<Track>(`/api/tracks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteTrack: (id: string) => req<void>(`/api/tracks/${id}`, { method: 'DELETE' }),
-    getWaveform: (id: string) =>
-      req<{ overview: number[]; detail: number[] }>(`/api/tracks/${id}/waveform`),
     addCue: (id: string, data: Partial<Cue>) =>
       req<Cue>(`/api/tracks/${id}/cues`, { method: 'POST', body: JSON.stringify(data) }),
     updateCue: (trackId: string, cueId: string, data: Partial<Cue>) =>
@@ -170,6 +168,9 @@ export const api = {
       req<void>(`/api/tracks/${id}/tags`, { method: 'POST', body: JSON.stringify({ tag_ids: tagIds }) }),
     reanalyze: (id: string) =>
       req<void>(`/api/tracks/${id}/reanalyze`, { method: 'POST' }),
+    getStreamUrl: (id: string) => `/api/tracks/${id}/stream`,
+    getWaveform: (id: string) =>
+      req<{ overview: number[]; detail: number[]; beat_times_ms: number[] }>(`/api/tracks/${id}/waveform`),
     uploadTrack: (file: File, onProgress?: (pct: number) => void): Promise<Track> => {
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
