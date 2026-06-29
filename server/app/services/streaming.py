@@ -136,10 +136,13 @@ def _fetch_spotify_tracklist(url: str) -> list:
     try:
         result = subprocess.run(
             ['spotdl', 'save', url, '--save-file', tmp_file],
-            capture_output=True, text=True, timeout=120
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=180
         )
         if result.returncode != 0:
-            logger.error(f"spotdl save failed: {result.stderr}")
+            logger.error(f"spotdl save exited {result.returncode}")
         if Path(tmp_file).exists():
             with open(tmp_file) as f:
                 data = json.load(f)
@@ -167,7 +170,8 @@ def _fetch_soundcloud_tracklist(url: str) -> list:
     try:
         result = subprocess.run(
             ['yt-dlp', '--flat-playlist', '-J', url],
-            capture_output=True, text=True, timeout=60
+            stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, timeout=60
         )
         data = json.loads(result.stdout)
         entries = data.get('entries', [data]) if 'entries' in data else [data]
@@ -190,7 +194,8 @@ def _fetch_youtube_tracklist(url: str) -> list:
     try:
         result = subprocess.run(
             ['yt-dlp', '--flat-playlist', '-J', url],
-            capture_output=True, text=True, timeout=60
+            stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, timeout=60
         )
         data = json.loads(result.stdout)
         entries = data.get('entries', [data])
@@ -226,11 +231,14 @@ def _download_spotdl(url: str, out_base: str, quality: str) -> Optional[str]:
         subprocess.run(
             [
                 'spotdl', 'download', url,
-                '--output', f'{out_dir}/{out_name}.{{ext}}',
+                '--output', f'{out_dir}/{out_name}.{{output-ext}}',
                 '--format', 'mp3' if quality != 'flac' else 'flac',
-                '--bitrate', '320k' if quality == 'best' else quality,
+                '--bitrate', '320k' if quality == 'best' else '128k',
             ],
-            capture_output=True, text=True, timeout=300
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=300
         )
         for ext in ['mp3', 'flac', 'opus', 'm4a']:
             p = Path(f"{out_base}.{ext}")
@@ -251,7 +259,10 @@ def _download_ytdlp(url: str, out_base: str, quality: str) -> Optional[str]:
                 '--embed-metadata', '--add-metadata',
                 url,
             ],
-            capture_output=True, text=True, timeout=300
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=300
         )
         for ext in ['mp3', 'flac', 'opus', 'm4a', 'webm']:
             p = Path(f"{out_base}.{ext}")

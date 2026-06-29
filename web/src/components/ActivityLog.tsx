@@ -34,8 +34,14 @@ export default function ActivityLog() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const activeCount = log.filter(e => e.status === 'uploading').length
   const errorCount = log.filter((e) => e.status === 'error').length + failedTracks.length
   const hasActivity = log.length > 0 || failedTracks.length > 0
+
+  // Auto-open when a new active job starts
+  useEffect(() => {
+    if (activeCount > 0) setOpen(true)
+  }, [activeCount])
 
   return (
     <div className="relative" ref={ref}>
@@ -45,14 +51,19 @@ export default function ActivityLog() {
           'relative flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors',
           open
             ? 'border-xkc-accent text-xkc-accent bg-xkc-accent/10'
+            : activeCount > 0
+            ? 'border-xkc-accent/60 text-xkc-accent hover:border-xkc-accent'
             : errorCount > 0
             ? 'border-red-500/40 text-red-400 hover:border-red-500/60'
             : 'border-xkc-border text-xkc-muted hover:text-xkc-text'
         )}
         title="Activity log"
       >
-        <ScrollText size={13} />
-        {errorCount > 0 && (
+        {activeCount > 0 ? <Loader size={13} className="animate-spin" /> : <ScrollText size={13} />}
+        {activeCount > 0 && (
+          <span className="text-[10px]">{activeCount} active</span>
+        )}
+        {activeCount === 0 && errorCount > 0 && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
             {errorCount > 9 ? '9+' : errorCount}
           </span>

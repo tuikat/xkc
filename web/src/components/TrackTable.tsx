@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Track, Tag } from '../lib/api'
 import { api } from '../lib/api'
@@ -62,34 +62,42 @@ function splitChips(str: string | null): string[] {
   })
 }
 
+function drawMiniWave(canvas: HTMLCanvasElement, pts: number[], isPlaying: boolean) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const W = 96, H = 24, BAR_W = 2, GAP = 1
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = W * dpr; canvas.height = H * dpr
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
+  ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H)
+  const numBars = Math.floor(W / (BAR_W + GAP))
+  const maxVal = Math.max(...pts, 0.001)
+  const midY = H / 2
+  for (let i = 0; i < numBars; i++) {
+    const norm = pts[Math.floor((i / numBars) * pts.length)] / maxVal
+    const h = Math.max(norm * midY * 0.9, 1)
+    ctx.fillStyle = isPlaying ? '#3b82f6' : '#334155'
+    ctx.fillRect(i * (BAR_W + GAP), midY - h, BAR_W, h * 2)
+  }
+}
+
 function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { data } = useQuery({
     queryKey: ['waveform', trackId],
     queryFn: () => api.tracks.getWaveform(trackId),
     staleTime: Infinity, gcTime: Infinity,
+    retry: 2,
   })
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !data?.overview?.length) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const W = 96, H = 24, BAR_W = 2, GAP = 1
-    const dpr = window.devicePixelRatio || 1
-    canvas.width = W * dpr; canvas.height = H * dpr
-    canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
-    ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H)
-    const pts = data.overview
-    const numBars = Math.floor(W / (BAR_W + GAP))
-    const maxVal = Math.max(...pts, 0.001)
-    const midY = H / 2
-    for (let i = 0; i < numBars; i++) {
-      const norm = pts[Math.floor((i / numBars) * pts.length)] / maxVal
-      const h = Math.max(norm * midY * 0.9, 1)
-      ctx.fillStyle = isPlaying ? '#3b82f6' : '#334155'
-      ctx.fillRect(i * (BAR_W + GAP), midY - h, BAR_W, h * 2)
+
+  // useLayoutEffect so we draw synchronously after paint — prevents the "cached
+  // data arrives, effect hasn't fired yet" miss that leaves canvases blank.
+  useLayoutEffect(() => {
+    if (canvasRef.current && data?.overview?.length) {
+      drawMiniWave(canvasRef.current, data.overview, isPlaying)
     }
   }, [data, isPlaying])
+
   return <canvas ref={canvasRef} width={96} height={24} style={{ display: 'block', width: 96, height: 24 }} />
 }
 
