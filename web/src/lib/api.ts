@@ -93,6 +93,19 @@ export interface StreamSource {
   download_quality?: string
 }
 
+export interface SyncLog {
+  id: string
+  source_id: string
+  source_name: string | null
+  status: 'running' | 'complete' | 'failed'
+  tracks_found: number
+  tracks_downloaded: number
+  tracks_skipped: number
+  error: string | null
+  started_at: string | null
+  completed_at: string | null
+}
+
 export interface TrackParams {
   q?: string
   playlist_id?: string
@@ -257,9 +270,11 @@ export const api = {
       req<StreamSource>(`/api/stream-sources/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteSource: (id: string) => req<void>(`/api/stream-sources/${id}`, { method: 'DELETE' }),
     syncSource: (id: string) =>
-      req<{ job_id: string }>(`/api/stream-sources/${id}/sync`, { method: 'POST' }),
-    getSyncJobStatus: (jobId: string) =>
-      req<{ status: string; error?: string; tracks_downloaded?: number; tracks_skipped?: number; tracks_found?: number }>(`/api/stream-sources/jobs/${jobId}`),
+      req<{ log_id: string; status: string; source_name: string }>(`/api/stream-sources/${id}/sync`, { method: 'POST' }),
+    getSyncLog: (logId: string) =>
+      req<SyncLog>(`/api/stream-sources/logs/${logId}`),
+    getActiveSyncs: () =>
+      req<SyncLog[]>('/api/stream-sources/active-syncs'),
   },
 
   export: {

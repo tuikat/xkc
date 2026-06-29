@@ -122,11 +122,12 @@ function StreamingTab() {
     mutationFn: api.streamSources.syncSource,
     onSuccess: (data, sourceId) => {
       const src = sources.find(s => s.id === sourceId)
-      const logId = data.job_id
-      addLog({ id: logId, name: `Sync: ${src?.display_name ?? 'Stream source'}`, status: 'uploading', ts: Date.now() })
+      const logId = data.log_id
+      const name = data.source_name ?? src?.display_name ?? 'Stream source'
+      addLog({ id: logId, name: `Sync: ${name}`, status: 'uploading', ts: Date.now() })
       const poll = setInterval(async () => {
         try {
-          const job = await api.streamSources.getSyncJobStatus(logId)
+          const job = await api.streamSources.getSyncLog(logId)
           if (job.status === 'complete') {
             clearInterval(poll)
             updateLog(logId, { status: 'complete', detail: `${job.tracks_downloaded ?? 0} downloaded, ${job.tracks_skipped ?? 0} skipped` })
@@ -136,7 +137,7 @@ function StreamingTab() {
             updateLog(logId, { status: 'error', detail: job.error ?? 'Sync failed' })
           }
         } catch { clearInterval(poll); updateLog(logId, { status: 'error', detail: 'Status check failed' }) }
-      }, 3000)
+      }, 4000)
     },
   })
 

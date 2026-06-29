@@ -57,6 +57,18 @@ def init_db():
                     db.add(models.Tag(group_id=group.id, name=tag_name, sort_order=j))
 
         db.commit()
+
+        # Mark any stale 'running' logs from a previous server run as failed
+        stale = db.query(models.StreamSyncLog).filter(
+            models.StreamSyncLog.status == 'running'
+        ).all()
+        for log in stale:
+            log.status = 'failed'
+            log.error = 'Server restarted during sync'
+        if stale:
+            db.commit()
+            logger.info(f"Marked {len(stale)} stale sync logs as failed")
+
         logger.info("Database initialized")
     except Exception as e:
         logger.error(f"DB init failed: {e}")

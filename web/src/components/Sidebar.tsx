@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { Playlist, TagGroup, StreamSource } from '../lib/api'
+import type { Playlist, TagGroup, StreamSource, SyncLog } from '../lib/api'
 import { Plus, ChevronDown, ChevronRight, Music, RefreshCw, Radio, X } from 'lucide-react'
 import { cn, hexColor } from '../lib/utils'
 import { useStore } from '../lib/store'
@@ -64,25 +64,56 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
     },
   })
 
+  // Track active poll intervals so we don't double-poll
+  const activePolls = useRef<Set<string>>(new Set())
+
+  function startPolling(logId: string, displayName: string) {
+    if (activePolls.current.has(logId)) return
+    activePolls.current.add(logId)
+    addLog({ id: logId, name: `Sync: ${displayName}`, status: 'uploading', ts: Date.now() })
+
+    const poll = setInterval(async () => {
+      try {
+        const log: SyncLog = await api.streamSources.getSyncLog(logId)
+        if (log.status === 'complete') {
+          clearInterval(poll)
+          activePolls.current.delete(logId)
+          updateLog(logId, {
+            status: 'complete',
+            detail: `${log.tracks_downloaded ?? 0} downloaded, ${log.tracks_skipped ?? 0} skipped`,
+          })
+          qc.invalidateQueries({ queryKey: ['tracks'] })
+          qc.invalidateQueries({ queryKey: ['playlists'] })
+        } else if (log.status === 'failed') {
+          clearInterval(poll)
+          activePolls.current.delete(logId)
+          updateLog(logId, { status: 'error', detail: log.error ?? 'Sync failed' })
+        } else if (log.tracks_downloaded !== undefined) {
+          // Update progress count in the log label
+          updateLog(logId, { name: `Sync: ${displayName} (${log.tracks_downloaded} downloaded)` })
+        }
+      } catch {
+        clearInterval(poll)
+        activePolls.current.delete(logId)
+        updateLog(logId, { status: 'error', detail: 'Status check failed' })
+      }
+    }, 4000)
+  }
+
+  // On load: discover any syncs running from a previous session or another tab
+  useEffect(() => {
+    api.streamSources.getActiveSyncs().then((logs: SyncLog[]) => {
+      for (const log of logs) {
+        startPolling(log.id, log.source_name ?? 'Stream source')
+      }
+    }).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const syncSource = useMutation({
     mutationFn: (id: string) => api.streamSources.syncSource(id),
     onSuccess: (data, sourceId) => {
       const src = sources.find(s => s.id === sourceId)
-      const logId = data.job_id
-      addLog({ id: logId, name: `Sync: ${src?.display_name ?? 'Stream source'}`, status: 'uploading', ts: Date.now() })
-      const poll = setInterval(async () => {
-        try {
-          const job = await api.streamSources.getSyncJobStatus(logId)
-          if (job.status === 'complete') {
-            clearInterval(poll)
-            updateLog(logId, { status: 'complete', detail: `${job.tracks_downloaded ?? 0} downloaded, ${job.tracks_skipped ?? 0} skipped` })
-            qc.invalidateQueries({ queryKey: ['tracks'] })
-          } else if (job.status === 'failed') {
-            clearInterval(poll)
-            updateLog(logId, { status: 'error', detail: job.error ?? 'Sync failed' })
-          }
-        } catch { clearInterval(poll); updateLog(logId, { status: 'error', detail: 'Status check failed' }) }
-      }, 3000)
+      startPolling(data.log_id, data.source_name ?? src?.display_name ?? 'Stream source')
     },
   })
 
