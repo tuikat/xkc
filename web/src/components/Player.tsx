@@ -148,7 +148,11 @@ export default function Player() {
 
   // Zoom / pan state (refs to avoid React re-renders in rAF)
   const viewStartMsRef = useRef(0)
-  const zoomPxPerMsRef = useRef(0)       // 0 = auto-fit
+  // visMsRef = the span of time (ms) currently visible in the canvas.
+  // 0 = auto (full track). Stored as a TIME RANGE, not pixels-per-ms,
+  // so resizing the canvas just rescales the same range rather than
+  // showing blank space or clipping.
+  const visMsRef = useRef(0)
   const manualScrollRef = useRef(false)  // suppress auto-follow when user panned
   const dragRef = useRef<{ startX: number; startViewMs: number; moved: boolean } | null>(null)
 
@@ -208,7 +212,7 @@ export default function Player() {
       audio.src = url
       audio.load()
       viewStartMsRef.current = 0
-      zoomPxPerMsRef.current = 0
+      visMsRef.current = 0
       manualScrollRef.current = false
     }
     const onDuration = () => { setDurationMs(audio.duration * 1000); durationMsRef.current = audio.duration * 1000 }
@@ -265,17 +269,16 @@ export default function Player() {
       return
     }
 
-    // Calculate visible window
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
+    // visMs is the time-range stored by the user; W/visMs gives pxPerMs for THIS frame's canvas width.
+    // When the canvas resizes, W changes but visMs stays the same → the range stretches to fit.
+    const visMs = visMsRef.current > 0 ? visMsRef.current : durMs
+    const pxPerMs = W / visMs
 
     // Auto-follow playhead while playing (unless user has manually scrolled)
-    if (!manualScrollRef.current || (audio.paused === false)) {
-      if (!manualScrollRef.current) {
-        viewStartMsRef.current = nowMs - visMs / 2
-      }
+    if (!manualScrollRef.current) {
+      viewStartMsRef.current = nowMs - visMs / 2
     }
-    viewStartMsRef.current = Math.max(0, Math.min(viewStartMsRef.current, durMs - visMs))
+    viewStartMsRef.current = Math.max(0, Math.min(viewStartMsRef.current, Math.max(0, durMs - visMs)))
 
     if (waveData?.detail?.length) {
       drawWaveform(
@@ -315,8 +318,7 @@ export default function Player() {
     const durMs = durationMsRef.current || durationMs
     if (!durMs) return
 
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
+    const visMs = visMsRef.current > 0 ? visMsRef.current : durMs
     const mouseFrac = (e.clientX - rect.left) / W
     const msAtMouse = viewStartMsRef.current + mouseFrac * visMs
 
@@ -324,7 +326,8 @@ export default function Player() {
     const newVisMs = Math.max(MIN_VIS_MS, Math.min(durMs, visMs * factor))
 
     viewStartMsRef.current = Math.max(0, Math.min(msAtMouse - mouseFrac * newVisMs, durMs - newVisMs))
-    zoomPxPerMsRef.current = newVisMs >= durMs ? 0 : W / newVisMs
+    // Store time-range, not pixels-per-ms — resize-safe
+    visMsRef.current = newVisMs >= durMs ? 0 : newVisMs
     manualScrollRef.current = true
   }
 
@@ -343,8 +346,8 @@ export default function Player() {
       const canvas = canvasRef.current!
       const W = canvas.clientWidth
       const durMs = durationMsRef.current || durationMs
-      const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-      const visMs = W / pxPerMs
+      const visMs = visMsRef.current > 0 ? visMsRef.current : durMs
+      const pxPerMs = W / visMs
       viewStartMsRef.current = Math.max(0, Math.min(
         dragRef.current.startViewMs - dx / pxPerMs,
         durMs - visMs
@@ -362,37 +365,33 @@ export default function Player() {
     }
   }
 
+  function getVisMs(W: number, durMs: number) {
+    return visMsRef.current > 0 ? visMsRef.current : durMs
+  }
+
   function seekAtX(clientX: number) {
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
-    const W = rect.width
     const durMs = durationMsRef.current || durationMs
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
-    const frac = (clientX - rect.left) / W
-    const ms = viewStartMsRef.current + frac * visMs
+    const visMs = getVisMs(rect.width, durMs)
+    const ms = viewStartMsRef.current + ((clientX - rect.left) / rect.width) * visMs
     getAudio().currentTime = Math.max(0, Math.min(ms, durMs)) / 1000
   }
 
   function msAtClientX(clientX: number): number {
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
-    const W = rect.width
     const durMs = durationMsRef.current || durationMs
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
-    const frac = (clientX - rect.left) / W
-    return viewStartMsRef.current + frac * visMs
+    const visMs = getVisMs(rect.width, durMs)
+    return viewStartMsRef.current + ((clientX - rect.left) / rect.width) * visMs
   }
 
   function findNearestCue(clientX: number): Cue | undefined {
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
-    const W = rect.width
     const durMs = durationMsRef.current || durationMs
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
-    const msPx = (ms: number) => ((ms - viewStartMsRef.current) / visMs) * W + rect.left
+    const visMs = getVisMs(rect.width, durMs)
+    const msPx = (ms: number) => ((ms - viewStartMsRef.current) / visMs) * rect.width + rect.left
     return cues.find((c) => Math.abs(msPx(c.position_ms) - clientX) < CUE_HIT_PX)
   }
 
@@ -405,7 +404,7 @@ export default function Player() {
   }
 
   function resetZoom() {
-    zoomPxPerMsRef.current = 0
+    visMsRef.current = 0           // 0 = auto (full track)
     viewStartMsRef.current = 0
     manualScrollRef.current = false
   }
@@ -413,26 +412,20 @@ export default function Player() {
   function zoomIn() {
     const canvas = canvasRef.current
     if (!canvas) return
-    const W = canvas.clientWidth
     const durMs = durationMsRef.current || durationMs
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
+    const visMs = visMsRef.current > 0 ? visMsRef.current : durMs
     const nowMs = getAudio().currentTime * 1000
     const newVisMs = Math.max(MIN_VIS_MS, visMs * 0.5)
+    visMsRef.current = newVisMs >= durMs ? 0 : newVisMs
     viewStartMsRef.current = Math.max(0, Math.min(nowMs - newVisMs / 2, durMs - newVisMs))
-    zoomPxPerMsRef.current = W / newVisMs
     manualScrollRef.current = false // re-engage auto-follow
   }
 
   function zoomOut() {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const W = canvas.clientWidth
     const durMs = durationMsRef.current || durationMs
-    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
-    const visMs = W / pxPerMs
+    const visMs = visMsRef.current > 0 ? visMsRef.current : durMs
     const newVisMs = Math.min(durMs, visMs * 2)
-    zoomPxPerMsRef.current = newVisMs >= durMs ? 0 : W / newVisMs
+    visMsRef.current = newVisMs >= durMs ? 0 : newVisMs
     if (newVisMs >= durMs) {
       viewStartMsRef.current = 0
       manualScrollRef.current = false
