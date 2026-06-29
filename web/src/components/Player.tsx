@@ -103,7 +103,7 @@ function drawWaveform(
 }
 
 export default function Player() {
-  const { playerTrack, playerExpanded, setPlayerTrack, setPlayerExpanded } = useStore()
+  const { playerTrack, playerExpanded, setPlayerTrack, setPlayerExpanded, setPlayerPlaying } = useStore()
   const qc = useQueryClient()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -152,9 +152,9 @@ export default function Player() {
       audio.load()
     }
     const onDuration = () => setDurationMs(audio.duration * 1000)
-    const onPlay = () => setPlaying(true)
-    const onPause = () => setPlaying(false)
-    const onEnded = () => { setPlaying(false) }
+    const onPlay = () => { setPlaying(true); setPlayerPlaying(true) }
+    const onPause = () => { setPlaying(false); setPlayerPlaying(false) }
+    const onEnded = () => { setPlaying(false); setPlayerPlaying(false) }
     audio.addEventListener('durationchange', onDuration)
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)

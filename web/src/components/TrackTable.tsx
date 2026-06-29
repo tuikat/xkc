@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react'
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Track, Tag } from '../lib/api'
 import { api } from '../lib/api'
 import { formatDuration, formatBpm, hexColor } from '../lib/utils'
 import { Star, Play, Pause, Loader2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useStore } from '../lib/store'
+import { getAudio } from './Player'
 
-interface ContextMenuState { x: number; y: number; trackId: string }
+interface ContextMenuState { x: number; y: number; trackIds: string[] }
 
 interface TrackTableProps {
   tracks: Track[]
@@ -65,11 +65,18 @@ function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: bool
   return <canvas ref={canvasRef} width={96} height={24} style={{ display: 'block', width: 96, height: 24 }} />
 }
 
-function Stars({ rating }: { rating: number }) {
+function Stars({ trackId, rating }: { trackId: string; rating: number }) {
+  const qc = useQueryClient()
+  function setRating(e: React.MouseEvent, stars: number) {
+    e.stopPropagation()
+    api.tracks.updateTrack(trackId, { rating: stars }).then(() => qc.invalidateQueries({ queryKey: ['tracks'] }))
+  }
   return (
     <div className="flex gap-0.5">
       {[1, 2, 3, 4, 5].map((i) => (
-        <Star key={i} size={10} className={i <= rating ? 'text-yellow-400 fill-yellow-400' : 'text-xkc-border'} />
+        <button key={i} onClick={(e) => setRating(e, i)} className="p-0 leading-none">
+          <Star size={10} className={i <= rating ? 'text-yellow-400 fill-yellow-400' : 'text-xkc-border hover:text-yellow-300'} />
+        </button>
       ))}
     </div>
   )
@@ -79,20 +86,76 @@ export default function TrackTable({
   tracks, onSelectTrack, selectedTrackId, tagGroups = [],
   onAddToPlaylist, onDeleteTrack, onReanalyze,
 }: TrackTableProps) {
+  const qc = useQueryClient()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
-  const { playerTrack, setPlayerTrack } = useStore()
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null)
+  const { playerTrack, playerPlaying, setPlayerTrack } = useStore()
   const allTags = tagGroups.flatMap((g) => g.tags)
   const tagById = Object.fromEntries(allTags.map((t) => [t.id, t]))
+
+  // Cmd+A to select all
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault()
+        setSelectedIds(tracks.map((t) => t.id))
+      }
+      if (e.key === 'Escape') setSelectedIds([])
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tracks])
+
+  function handleRowClick(e: React.MouseEvent, track: Track, idx: number) {
+    const id = track.id
+    if (e.shiftKey && lastSelectedIdx !== null) {
+      // Range select
+      const lo = Math.min(lastSelectedIdx, idx)
+      const hi = Math.max(lastSelectedIdx, idx)
+      const rangeIds = tracks.slice(lo, hi + 1).map((t) => t.id)
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
+    } else if (e.metaKey || e.ctrlKey) {
+      // Toggle individual
+      setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+      setLastSelectedIdx(idx)
+    } else {
+      // Normal click — open detail, reset multi-select
+      setSelectedIds([id])
+      setLastSelectedIdx(idx)
+      onSelectTrack(id)
+    }
+  }
 
   function handlePlay(e: React.MouseEvent, track: Track) {
     e.stopPropagation()
     if (track.analysis_state !== 'complete') return
-    setPlayerTrack(playerTrack?.id === track.id ? null : track)
-    if (playerTrack?.id !== track.id) setPlayerTrack(track)
+    if (playerTrack?.id === track.id) {
+      const a = getAudio()
+      if (a.paused) a.play()
+      else a.pause()
+    } else {
+      setPlayerTrack(track)
+      setTimeout(() => getAudio().play().catch(() => {}), 100)
+    }
   }
 
+  function handleDragStart(e: React.DragEvent, track: Track) {
+    // Drag all selected tracks, or just this one if not in selection
+    const ids = selectedIds.includes(track.id) ? selectedIds : [track.id]
+    e.dataTransfer.setData('trackIds', JSON.stringify(ids))
+    e.dataTransfer.setData('text/plain', ids.join(','))
+    e.dataTransfer.effectAllowed = 'copy'
+  }
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, track: Track) => {
+    e.preventDefault()
+    const ids = selectedIds.includes(track.id) ? selectedIds : [track.id]
+    setContextMenu({ x: e.clientX, y: e.clientY, trackIds: ids })
+  }, [selectedIds])
+
   return (
-    <div className="relative flex flex-col h-full" onClick={() => setContextMenu(null)}>
+    <div className="relative flex flex-col h-full" onClick={() => { setContextMenu(null) }}>
       {/* Header */}
       <div
         className="grid gap-x-2 px-3 py-2 border-b border-xkc-border text-xs text-xkc-muted uppercase tracking-wider bg-xkc-surface sticky top-0 z-10"
@@ -116,19 +179,24 @@ export default function TrackTable({
         {tracks.length === 0 && (
           <div className="flex items-center justify-center h-32 text-xkc-muted text-sm">No tracks found</div>
         )}
-        {tracks.map((track) => {
-          const isSelected = selectedTrackId === track.id
-          const isPlaying = playerTrack?.id === track.id
+        {tracks.map((track, idx) => {
+          const isSelected = selectedIds.includes(track.id)
+          const isDetailOpen = selectedTrackId === track.id
+          const isLoaded = playerTrack?.id === track.id
+          const isPlaying = isLoaded && playerPlaying
           const canPlay = track.analysis_state === 'complete'
           return (
             <div
               key={track.id}
-              onClick={() => onSelectTrack(track.id)}
-              onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, trackId: track.id }) }}
+              draggable={canPlay}
+              onDragStart={(e) => handleDragStart(e, track)}
+              onClick={(e) => handleRowClick(e, track, idx)}
+              onContextMenu={(e) => handleContextMenu(e, track)}
               className={cn(
-                'grid gap-x-2 px-3 py-1.5 border-b border-xkc-border/50 cursor-pointer hover:bg-xkc-surface text-sm items-center',
-                isSelected && 'bg-xkc-surface border-l-2 border-l-xkc-accent',
-                isPlaying && 'bg-blue-950/30'
+                'grid gap-x-2 px-3 py-1.5 border-b border-xkc-border/50 cursor-pointer hover:bg-xkc-surface text-sm items-center select-none',
+                isSelected && 'bg-blue-900/40',
+                isDetailOpen && !isSelected && 'border-l-2 border-l-xkc-accent',
+                isLoaded && !isSelected && 'bg-blue-950/30',
               )}
               style={{ gridTemplateColumns: COL_STYLE }}
             >
@@ -138,12 +206,12 @@ export default function TrackTable({
                 className={cn(
                   'w-6 h-6 rounded-full flex items-center justify-center transition-colors flex-shrink-0',
                   canPlay
-                    ? isPlaying
+                    ? isLoaded
                       ? 'bg-xkc-accent text-white hover:bg-blue-600'
                       : 'text-xkc-muted hover:bg-xkc-accent/20 hover:text-xkc-accent'
                     : 'text-xkc-border cursor-default',
                 )}
-                title={!canPlay ? `Analysis: ${track.analysis_state}` : isPlaying ? 'Playing' : 'Play'}
+                title={!canPlay ? `Analysis: ${track.analysis_state}` : isPlaying ? 'Pause' : isLoaded ? 'Play' : 'Load & Play'}
               >
                 {track.analysis_state === 'analyzing' ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -180,29 +248,39 @@ export default function TrackTable({
                   ) : null
                 })}
               </div>
-              <Stars rating={track.rating} />
+              <Stars trackId={track.id} rating={track.rating} />
               <div className="text-xkc-muted text-xs">{new Date(track.date_added).toLocaleDateString()}</div>
             </div>
           )
         })}
       </div>
 
+      {/* Selection count badge */}
+      {selectedIds.length > 1 && (
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-xkc-accent text-white text-xs rounded-full px-3 py-1 shadow-lg pointer-events-none">
+          {selectedIds.length} tracks selected
+        </div>
+      )}
+
       {/* Context Menu */}
       {contextMenu && (
         <div
-          className="fixed z-50 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl py-1 min-w-[160px] text-sm"
+          className="fixed z-50 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl py-1 min-w-[180px] text-sm"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
+          <div className="px-3 py-1 text-xs text-xkc-muted border-b border-xkc-border mb-1">
+            {contextMenu.trackIds.length} track{contextMenu.trackIds.length > 1 ? 's' : ''} selected
+          </div>
           {onAddToPlaylist && (
             <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
-              onClick={() => { onAddToPlaylist(contextMenu.trackId); setContextMenu(null) }}>
+              onClick={() => { contextMenu.trackIds.forEach((id) => onAddToPlaylist(id)); setContextMenu(null) }}>
               Add to Playlist
             </button>
           )}
-          {onReanalyze && (
+          {onReanalyze && contextMenu.trackIds.length === 1 && (
             <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
-              onClick={() => { onReanalyze(contextMenu.trackId); setContextMenu(null) }}>
+              onClick={() => { onReanalyze(contextMenu.trackIds[0]); setContextMenu(null) }}>
               Re-analyze
             </button>
           )}
@@ -210,8 +288,8 @@ export default function TrackTable({
             <>
               <div className="border-t border-xkc-border my-1" />
               <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-red-400"
-                onClick={() => { onDeleteTrack(contextMenu.trackId); setContextMenu(null) }}>
-                Delete
+                onClick={() => { contextMenu.trackIds.forEach((id) => onDeleteTrack(id)); setContextMenu(null) }}>
+                Delete {contextMenu.trackIds.length > 1 ? `${contextMenu.trackIds.length} tracks` : 'track'}
               </button>
             </>
           )}

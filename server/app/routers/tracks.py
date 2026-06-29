@@ -354,21 +354,10 @@ def get_waveform(
     beat = db.query(models.Beat).filter(models.Beat.track_id == track_id).first()
     if not beat:
         return {"overview": [], "detail": [], "beat_times_ms": []}
-    import zlib, json as _json
-    overview, detail = [], []
-    if beat.waveform_overview:
-        try:
-            overview = _json.loads(zlib.decompress(beat.waveform_overview))
-        except Exception:
-            pass
-    if beat.waveform_detail:
-        try:
-            detail = _json.loads(zlib.decompress(beat.waveform_detail))
-        except Exception:
-            pass
+    from app.services.audio import decode_waveform
     return {
-        "overview": overview,
-        "detail": detail,
+        "overview": decode_waveform(beat.waveform_overview) if beat.waveform_overview else [],
+        "detail": decode_waveform(beat.waveform_detail) if beat.waveform_detail else [],
         "beat_times_ms": beat.beat_positions_ms or [],
     }
 

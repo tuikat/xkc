@@ -54,8 +54,10 @@ interface AppState {
 
   playerTrack: Track | null
   playerExpanded: boolean
+  playerPlaying: boolean
   setPlayerTrack: (track: Track | null) => void
   setPlayerExpanded: (v: boolean) => void
+  setPlayerPlaying: (v: boolean) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -102,6 +104,8 @@ export const useStore = create<AppState>((set) => ({
 
   playerTrack: null,
   playerExpanded: false,
-  setPlayerTrack: (track) => set({ playerTrack: track, playerExpanded: track !== null }),
+  playerPlaying: false,
+  setPlayerTrack: (track) => set({ playerTrack: track, playerExpanded: track !== null, playerPlaying: false }),
   setPlayerExpanded: (v) => set({ playerExpanded: v }),
+  setPlayerPlaying: (v) => set({ playerPlaying: v }),
 }))
