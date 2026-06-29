@@ -17,7 +17,7 @@ const AUDIO_TYPES = new Set([
 
 export default function UploadZone({ children }: UploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false)
-  const { uploadQueue, addToQueue, updateQueueItem, clearCompleted } = useStore()
+  const { uploadQueue, addToQueue, updateQueueItem, clearCompleted, addLog, updateLog } = useStore()
   const qc = useQueryClient()
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
@@ -29,18 +29,19 @@ export default function UploadZone({ children }: UploadZoneProps) {
     for (const file of audioFiles) {
       const queueId = addToQueue(file)
       updateQueueItem(queueId, { status: 'uploading' })
+      addLog({ id: queueId, name: file.name, status: 'uploading', ts: Date.now() })
       try {
         await api.tracks.uploadTrack(file, (pct) => updateQueueItem(queueId, { progress: pct }))
         updateQueueItem(queueId, { status: 'complete', progress: 100 })
+        updateLog(queueId, { status: 'complete' })
         qc.invalidateQueries({ queryKey: ['tracks'] })
       } catch (err) {
-        updateQueueItem(queueId, {
-          status: 'error',
-          error: err instanceof Error ? err.message : 'Upload failed',
-        })
+        const msg = err instanceof Error ? err.message : 'Upload failed'
+        updateQueueItem(queueId, { status: 'error', error: msg })
+        updateLog(queueId, { status: 'error', detail: msg })
       }
     }
-  }, [addToQueue, updateQueueItem, qc])
+  }, [addToQueue, updateQueueItem, addLog, updateLog, qc])
 
   useEffect(() => {
     function onDragOver(e: DragEvent) { e.preventDefault(); setIsDragOver(true) }

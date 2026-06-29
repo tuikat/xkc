@@ -100,6 +100,7 @@ export interface TrackParams {
   min_bpm?: number
   max_bpm?: number
   key_camelot?: string
+  analysis_state?: string
   sort_by?: string
   limit?: number
   offset?: number

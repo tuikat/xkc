@@ -9,6 +9,14 @@ interface UploadItem {
   error?: string
 }
 
+export interface LogEntry {
+  id: string
+  name: string
+  status: 'uploading' | 'complete' | 'error'
+  detail?: string
+  ts: number
+}
+
 interface Filters {
   minBpm?: number
   maxBpm?: number
@@ -38,6 +46,11 @@ interface AppState {
   updateQueueItem: (id: string, data: Partial<UploadItem>) => void
   removeFromQueue: (id: string) => void
   clearCompleted: () => void
+
+  log: LogEntry[]
+  addLog: (entry: LogEntry) => void
+  updateLog: (id: string, update: Partial<LogEntry>) => void
+  clearLog: () => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -74,4 +87,11 @@ export const useStore = create<AppState>((set) => ({
     set((s) => ({
       uploadQueue: s.uploadQueue.filter((i) => i.status !== 'complete'),
     })),
+
+  log: [],
+  addLog: (entry) =>
+    set((s) => ({ log: [entry, ...s.log].slice(0, 200) })),
+  updateLog: (id, update) =>
+    set((s) => ({ log: s.log.map((e) => (e.id === id ? { ...e, ...update } : e)) })),
+  clearLog: () => set({ log: [] }),
 }))

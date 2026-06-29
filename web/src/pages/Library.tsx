@@ -7,6 +7,7 @@ import Sidebar from '../components/Sidebar'
 import TrackTable from '../components/TrackTable'
 import TrackDetail from '../components/TrackDetail'
 import UploadZone from '../components/UploadZone'
+import ActivityLog from '../components/ActivityLog'
 import { Search, Upload, Settings, Users, LogOut, Download, ChevronDown, X, SlidersHorizontal } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -15,7 +16,7 @@ export default function Library() {
   const qc = useQueryClient()
   const {
     user, searchQuery, setSearchQuery, selectedPlaylistId, setSelectedPlaylistId,
-    selectedTrackId, setSelectedTrackId, filters, setFilters,
+    selectedTrackId, setSelectedTrackId, filters, setFilters, addLog, updateLog,
   } = useStore()
 
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
@@ -69,17 +70,20 @@ export default function Library() {
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     if (e.target.files) {
-      // UploadZone handles document-level drops, but we simulate one via the store
       const { addToQueue, updateQueueItem } = useStore.getState()
       Array.from(e.target.files).forEach(async (file) => {
         const qid = addToQueue(file)
         updateQueueItem(qid, { status: 'uploading' })
+        addLog({ id: qid, name: file.name, status: 'uploading', ts: Date.now() })
         try {
           await api.tracks.uploadTrack(file, (pct) => updateQueueItem(qid, { progress: pct }))
           updateQueueItem(qid, { status: 'complete', progress: 100 })
+          updateLog(qid, { status: 'complete' })
           qc.invalidateQueries({ queryKey: ['tracks'] })
         } catch (err) {
-          updateQueueItem(qid, { status: 'error', error: err instanceof Error ? err.message : 'Failed' })
+          const msg = err instanceof Error ? err.message : 'Upload failed'
+          updateQueueItem(qid, { status: 'error', error: msg })
+          updateLog(qid, { status: 'error', detail: msg })
         }
       })
     }
@@ -126,6 +130,8 @@ export default function Library() {
             <Download size={12} />
             Export
           </button>
+
+          <ActivityLog />
 
           {/* Upload button */}
           <button
