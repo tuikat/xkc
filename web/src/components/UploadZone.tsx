@@ -44,12 +44,23 @@ export default function UploadZone({ children }: UploadZoneProps) {
   }, [addToQueue, updateQueueItem, addLog, updateLog, qc])
 
   useEffect(() => {
-    function onDragOver(e: DragEvent) { e.preventDefault(); setIsDragOver(true) }
-    function onDragLeave() { setIsDragOver(false) }
+    function isFileDrag(e: DragEvent) {
+      const types = Array.from(e.dataTransfer?.types ?? [])
+      // Internal track drags use 'trackids'; filesystem drags use 'Files'
+      return types.includes('Files') && !types.includes('trackids')
+    }
+    function onDragOver(e: DragEvent) {
+      e.preventDefault()
+      if (isFileDrag(e)) setIsDragOver(true)
+    }
+    function onDragLeave(e: DragEvent) {
+      // Only clear if leaving the window entirely
+      if (!e.relatedTarget) setIsDragOver(false)
+    }
     function onDrop(e: DragEvent) {
       e.preventDefault()
       setIsDragOver(false)
-      if (e.dataTransfer?.files) processFiles(e.dataTransfer.files)
+      if (isFileDrag(e) && e.dataTransfer?.files?.length) processFiles(e.dataTransfer.files)
     }
     document.addEventListener('dragover', onDragOver)
     document.addEventListener('dragleave', onDragLeave)

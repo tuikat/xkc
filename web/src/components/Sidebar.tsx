@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { Playlist, TagGroup, StreamSource } from '../lib/api'
-import { Plus, ChevronDown, ChevronRight, Music, RefreshCw, Radio, Trash2, X, Check } from 'lucide-react'
+import { Plus, ChevronDown, ChevronRight, Music, RefreshCw, Radio, X } from 'lucide-react'
 import { cn, hexColor } from '../lib/utils'
 
 interface SidebarProps {
@@ -27,6 +27,9 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
   const [editSource, setEditSource] = useState<Partial<StreamSource>>({})
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [dragOverPlaylist, setDragOverPlaylist] = useState<string | null>(null)
+  const [plCtxMenu, setPlCtxMenu] = useState<{ x: number; y: number; pl: Playlist } | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameVal, setRenameVal] = useState('')
 
   const { data: playlists = [] } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists.getPlaylists })
   const { data: tagGroups = [] } = useQuery({ queryKey: ['tagGroups'], queryFn: api.tags.getTagGroups })
@@ -43,12 +46,19 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
     onSuccess: () => qc.invalidateQueries({ queryKey: ['playlists'] }),
   })
 
+  const renamePlaylist = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.playlists.updatePlaylist(id, { name } as Partial<Playlist>),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['playlists'] }); setRenamingId(null); setPlCtxMenu(null) },
+  })
+
   const deletePlaylist = useMutation({
     mutationFn: (id: string) => api.playlists.deletePlaylist(id),
     onSuccess: (_, id) => {
       qc.invalidateQueries({ queryKey: ['playlists'] })
+      // Always fall back to All Tracks when deleted playlist was active or it was the last one
       if (selectedPlaylistId === id) onPlaylistSelect(null)
       setConfirmDelete(null)
+      setPlCtxMenu(null)
     },
   })
 
@@ -120,44 +130,40 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
         {playlists.map((pl) => (
           <div
             key={pl.id}
-            className={cn('group flex items-center rounded-lg transition-colors', dragOverPlaylist === pl.id && 'bg-xkc-accent/20 ring-1 ring-xkc-accent')}
+            className={cn('rounded-lg transition-colors', dragOverPlaylist === pl.id && 'bg-xkc-accent/20 ring-1 ring-xkc-accent')}
             onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPlaylist(pl.id) }}
             onDragLeave={() => setDragOverPlaylist(null)}
             onDrop={(e) => {
               e.preventDefault()
               setDragOverPlaylist(null)
               const raw = e.dataTransfer.getData('trackIds')
-              if (raw) {
-                const ids = JSON.parse(raw) as string[]
-                addTracksToPlaylist.mutate({ plId: pl.id, trackIds: ids })
-              }
+              if (raw) addTracksToPlaylist.mutate({ plId: pl.id, trackIds: JSON.parse(raw) as string[] })
             }}
           >
-            <SidebarItem
-              label={pl.name}
-              count={pl.track_count}
-              active={selectedPlaylistId === pl.id}
-              onClick={() => onPlaylistSelect(pl.id)}
-              dotColor={hexColor(pl.cover_color)}
-              className="flex-1 min-w-0"
-            />
-            {confirmDelete === pl.id ? (
-              <div className="flex items-center gap-1 ml-1 flex-shrink-0">
-                <button className="text-red-400 hover:text-red-300" onClick={() => deletePlaylist.mutate(pl.id)} title="Confirm delete">
-                  <Check size={11} />
-                </button>
-                <button className="text-xkc-muted hover:text-xkc-text" onClick={() => setConfirmDelete(null)} title="Cancel">
-                  <X size={11} />
-                </button>
-              </div>
-            ) : (
-              <button
-                className="opacity-0 group-hover:opacity-100 ml-1 flex-shrink-0 text-xkc-muted hover:text-red-400 transition-opacity"
-                onClick={(e) => { e.stopPropagation(); setConfirmDelete(pl.id) }}
-                title="Delete playlist"
+            {renamingId === pl.id ? (
+              <form
+                onSubmit={(e) => { e.preventDefault(); if (renameVal.trim()) renamePlaylist.mutate({ id: pl.id, name: renameVal.trim() }) }}
+                className="px-1 mb-1"
               >
-                <Trash2 size={11} />
-              </button>
+                <input
+                  autoFocus
+                  value={renameVal}
+                  onChange={(e) => setRenameVal(e.target.value)}
+                  onBlur={() => { if (!renameVal.trim()) setRenamingId(null) }}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setRenamingId(null) }}
+                  className="w-full bg-xkc-bg border border-xkc-accent rounded px-2 py-1 text-xs text-xkc-text focus:outline-none"
+                />
+              </form>
+            ) : (
+              <SidebarItem
+                label={pl.name}
+                count={pl.track_count}
+                active={selectedPlaylistId === pl.id}
+                onClick={() => onPlaylistSelect(pl.id)}
+                onContextMenu={(e) => { e.preventDefault(); setPlCtxMenu({ x: e.clientX, y: e.clientY, pl }) }}
+                dotColor={hexColor(pl.cover_color)}
+                className="w-full"
+              />
             )}
           </div>
         ))}
@@ -166,6 +172,29 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
           <div className="text-xs text-xkc-muted px-1">No playlists yet</div>
         )}
       </div>
+
+      {/* Playlist right-click context menu */}
+      {plCtxMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPlCtxMenu(null)} />
+          <div
+            className="fixed z-50 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl py-1 min-w-[160px] text-sm"
+            style={{ left: plCtxMenu.x, top: plCtxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-3 py-1 text-xs text-xkc-muted border-b border-xkc-border mb-1 truncate">{plCtxMenu.pl.name}</div>
+            <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
+              onClick={() => { setRenamingId(plCtxMenu.pl.id); setRenameVal(plCtxMenu.pl.name); setPlCtxMenu(null) }}>
+              Rename
+            </button>
+            <div className="border-t border-xkc-border my-1" />
+            <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-red-400"
+              onClick={() => deletePlaylist.mutate(plCtxMenu.pl.id)}>
+              Delete
+            </button>
+          </div>
+        </>
+      )}
 
       {/* My Tags */}
       <div className="p-3 border-b border-xkc-border">
@@ -370,11 +399,12 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
 }
 
 function SidebarItem({
-  label, active, onClick, count, dotColor, icon, className
+  label, active, onClick, onContextMenu, count, dotColor, icon, className
 }: {
   label: string
   active?: boolean
   onClick: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
   count?: number
   dotColor?: string
   icon?: React.ReactNode
@@ -383,6 +413,7 @@ function SidebarItem({
   return (
     <button
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={cn(
         'flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-left transition-colors w-full min-w-0',
         active ? 'bg-xkc-accent/20 text-xkc-accent' : 'text-xkc-muted hover:text-xkc-text hover:bg-xkc-border/50',

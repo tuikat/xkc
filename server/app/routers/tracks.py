@@ -432,6 +432,26 @@ def set_track_tags(
     return {"tag_ids": [t.id for t in tags]}
 
 
+@router.patch("/{track_id}/beats")
+def update_beats(
+    track_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_permission("edit_metadata")),
+):
+    beat = db.query(models.Beat).filter(models.Beat.track_id == track_id).first()
+    if not beat:
+        raise HTTPException(status_code=404, detail="Beat data not found")
+    offset_ms = body.get("offset_ms")
+    positions = body.get("beat_positions_ms")
+    if offset_ms is not None and beat.beat_positions_ms:
+        beat.beat_positions_ms = [round(p + offset_ms, 3) for p in beat.beat_positions_ms]
+    elif positions is not None:
+        beat.beat_positions_ms = positions
+    db.commit()
+    return {"beat_positions_ms": beat.beat_positions_ms}
+
+
 @router.post("/{track_id}/reanalyze")
 def reanalyze_track(
     track_id: str,

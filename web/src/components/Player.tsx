@@ -1,12 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Play, Pause, Square, ChevronUp, ChevronDown, X, Plus } from 'lucide-react'
+import { Play, Pause, Square, ChevronUp, ChevronDown, X, Plus, ZoomIn, ZoomOut } from 'lucide-react'
 import { useStore } from '../lib/store'
 import { api } from '../lib/api'
 import { hexColor, formatDuration } from '../lib/utils'
 import type { Cue } from '../lib/api'
 
-// Module-level singleton audio element
 let _audio: HTMLAudioElement | null = null
 export function getAudio() {
   if (!_audio && typeof window !== 'undefined') {
@@ -17,11 +16,14 @@ export function getAudio() {
   return _audio!
 }
 
+const WAVEFORM_H = 108
 const BAR_W = 3
 const BAR_GAP = 1
-const WAVEFORM_H = 100
+const MIN_VIS_MS = 500     // maximum zoom-in: 500ms window
+const CUE_HIT_PX = 10     // pixels tolerance for cue detection
 
-// Draw waveform bars downsampled to fit the canvas
+interface CtxMenu { x: number; y: number; ms: number; nearCueId?: string }
+
 function drawWaveform(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -29,77 +31,110 @@ function drawWaveform(
   pts: number[],
   currentMs: number,
   durationMs: number,
+  viewStartMs: number,
+  visMs: number,
   beatTimesMs: number[],
   cues: Cue[],
+  pxPerMs: number,
 ) {
   ctx.clearRect(0, 0, W, H)
-  ctx.fillStyle = '#0d0d0d'
+  ctx.fillStyle = '#0a0a0a'
   ctx.fillRect(0, 0, W, H)
+  if (!durationMs || !pts.length) return
 
-  const numBars = Math.floor(W / (BAR_W + BAR_GAP))
   const maxVal = Math.max(...pts, 0.001)
   const midY = H / 2
-  const progress = durationMs > 0 ? currentMs / durationMs : 0
+  const numBars = Math.floor(W / (BAR_W + BAR_GAP))
 
-  // Beat grid lines
-  if (beatTimesMs.length && durationMs > 0) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)'
-    ctx.lineWidth = 1
-    for (const bms of beatTimesMs) {
-      const x = (bms / durationMs) * W
+  // Beat grid — show labels at high enough zoom
+  const showBeatLabels = pxPerMs > 0.3 // ~300px/sec
+  const showBeats = pxPerMs > 0.05
+  if (showBeats) {
+    for (let bi = 0; bi < beatTimesMs.length; bi++) {
+      const bms = beatTimesMs[bi]
+      const bx = ((bms - viewStartMs) / visMs) * W
+      if (bx < -2 || bx > W + 2) continue
+      // every 4th beat = bar line (brighter)
+      const isBar = bi % 4 === 0
+      ctx.strokeStyle = isBar ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)'
+      ctx.lineWidth = isBar ? 1.5 : 1
       ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, H)
+      ctx.moveTo(bx, 0)
+      ctx.lineTo(bx, H)
       ctx.stroke()
-    }
-  }
-
-  // Waveform bars — two passes: past (bright) then future (dark)
-  for (let i = 0; i < numBars; i++) {
-    const srcIdx = Math.floor((i / numBars) * pts.length)
-    const norm = pts[srcIdx] / maxVal
-    const h = Math.max(norm * midY * 0.92, 2)
-    const x = i * (BAR_W + BAR_GAP)
-    const barProgress = i / numBars
-    ctx.fillStyle = barProgress <= progress ? '#3b82f6' : '#1e3a5f'
-    ctx.fillRect(x, midY - h, BAR_W, h * 2)
-  }
-
-  // Playhead
-  const playX = progress * W
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(playX, 0)
-  ctx.lineTo(playX, H)
-  ctx.stroke()
-
-  // Cue markers
-  if (durationMs > 0) {
-    for (const cue of cues) {
-      const cx = (cue.position_ms / durationMs) * W
-      const col = hexColor(cue.color)
-      ctx.strokeStyle = col
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(cx, 4)
-      ctx.lineTo(cx, H - 4)
-      ctx.stroke()
-      // small flag top
-      ctx.fillStyle = col
-      ctx.beginPath()
-      ctx.moveTo(cx, 4)
-      ctx.lineTo(cx + 10, 4)
-      ctx.lineTo(cx, 14)
-      ctx.closePath()
-      ctx.fill()
-      if (cue.label) {
-        ctx.fillStyle = '#fff'
-        ctx.font = 'bold 8px sans-serif'
-        ctx.fillText(cue.label.slice(0, 4), cx + 2, 12)
+      if (showBeatLabels && isBar) {
+        ctx.fillStyle = 'rgba(255,255,255,0.35)'
+        ctx.font = '9px monospace'
+        ctx.fillText(String(Math.round(bi / 4 + 1)), bx + 3, 11)
       }
     }
   }
+
+  // Waveform bars
+  for (let i = 0; i < numBars; i++) {
+    const barMs = viewStartMs + (i / numBars) * visMs
+    if (barMs < 0 || barMs > durationMs) continue
+    const srcIdx = Math.min(Math.floor((barMs / durationMs) * pts.length), pts.length - 1)
+    const norm = pts[srcIdx] / maxVal
+    const h = Math.max(norm * midY * 0.92, 2)
+    const x = i * (BAR_W + BAR_GAP)
+    ctx.fillStyle = barMs <= currentMs ? '#2563eb' : '#1a3460'
+    ctx.fillRect(x, midY - h, BAR_W, h * 2)
+  }
+
+  // Time ruler at bottom
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'
+  ctx.fillRect(0, H - 14, W, 14)
+  const rulerStep = pickRulerStep(visMs)
+  const firstTick = Math.ceil(viewStartMs / rulerStep) * rulerStep
+  ctx.fillStyle = 'rgba(255,255,255,0.45)'
+  ctx.font = '9px monospace'
+  for (let t = firstTick; t < viewStartMs + visMs; t += rulerStep) {
+    const rx = ((t - viewStartMs) / visMs) * W
+    if (rx < 0 || rx > W) continue
+    ctx.fillRect(rx, H - 14, 1, 4)
+    ctx.fillText(formatMs(t), rx + 3, H - 3)
+  }
+
+  // Cue markers
+  for (const cue of cues) {
+    const cx = ((cue.position_ms - viewStartMs) / visMs) * W
+    if (cx < -20 || cx > W + 20) continue
+    const col = hexColor(cue.color)
+    ctx.strokeStyle = col
+    ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.moveTo(cx, 14); ctx.lineTo(cx, H - 14); ctx.stroke()
+    ctx.fillStyle = col
+    ctx.beginPath(); ctx.moveTo(cx, 14); ctx.lineTo(cx + 12, 14); ctx.lineTo(cx, 26); ctx.closePath(); ctx.fill()
+    if (cue.label) {
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 8px sans-serif'
+      ctx.fillText(cue.label.slice(0, 5), cx + 2, 24)
+    }
+  }
+
+  // Playhead
+  const playX = ((currentMs - viewStartMs) / visMs) * W
+  if (playX >= 0 && playX <= W) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+    ctx.lineWidth = 2
+    ctx.beginPath(); ctx.moveTo(playX, 0); ctx.lineTo(playX, H); ctx.stroke()
+    // playhead triangle at top
+    ctx.fillStyle = '#fff'
+    ctx.beginPath(); ctx.moveTo(playX - 5, 0); ctx.lineTo(playX + 5, 0); ctx.lineTo(playX, 8); ctx.closePath(); ctx.fill()
+  }
+}
+
+function pickRulerStep(visMs: number): number {
+  const steps = [50, 100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000]
+  const target = visMs / 8
+  return steps.find((s) => s >= target) ?? 60000
+}
+function formatMs(ms: number): string {
+  const s = ms / 1000
+  const m = Math.floor(s / 60)
+  const sec = (s % 60).toFixed(s < 60 ? 1 : 0)
+  return m > 0 ? `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}` : `${sec}s`
 }
 
 export default function Player() {
@@ -107,14 +142,23 @@ export default function Player() {
   const qc = useQueryClient()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
   const progressBarRef = useRef<HTMLDivElement>(null)
   const timeRef = useRef<HTMLSpanElement>(null)
   const rafRef = useRef<number>(0)
 
+  // Zoom / pan state (refs to avoid React re-renders in rAF)
+  const viewStartMsRef = useRef(0)
+  const zoomPxPerMsRef = useRef(0)       // 0 = auto-fit
+  const manualScrollRef = useRef(false)  // suppress auto-follow when user panned
+  const dragRef = useRef<{ startX: number; startViewMs: number; moved: boolean } | null>(null)
+
   const [playing, setPlaying] = useState(false)
   const [durationMs, setDurationMs] = useState(0)
-  const [containerW, setContainerW] = useState(800)
+  const durationMsRef = useRef(0)
+
+  // Right-click context menu state
+  const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
+  const [cueLabel, setCueLabel] = useState('')
 
   const { data: waveData } = useQuery({
     queryKey: ['waveform', playerTrack?.id],
@@ -131,18 +175,31 @@ export default function Player() {
   })
 
   const cues: Cue[] = (fullTrack as unknown as { cues?: Cue[] })?.cues ?? []
+  const beatTimesMs: number[] = waveData?.beat_times_ms ?? []
 
   const addCue = useMutation({
-    mutationFn: (posMs: number) => api.tracks.addCue(playerTrack!.id, {
-      position_ms: Math.round(posMs),
-      type: 'hot',
-      color: 0xCC2200,
-      sort_order: cues.length,
-    }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['track', playerTrack?.id] }),
+    mutationFn: ({ posMs, label }: { posMs: number; label: string }) =>
+      api.tracks.addCue(playerTrack!.id, {
+        position_ms: Math.round(posMs), type: 'hot',
+        color: [0xCC2200, 0x0066CC, 0x00AA44, 0xCC8800, 0xAA00CC][cues.length % 5],
+        sort_order: cues.length, label: label || null,
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['track', playerTrack?.id] }); setCtxMenu(null); setCueLabel('') },
   })
 
-  // Load new track
+  const deleteCue = useMutation({
+    mutationFn: (cueId: string) => api.tracks.deleteCue(playerTrack!.id, cueId),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['track', playerTrack?.id] }); setCtxMenu(null) },
+  })
+
+  const nudgeBeats = useMutation({
+    mutationFn: (offset_ms: number) => api.tracks.updateBeats(playerTrack!.id, { offset_ms }),
+    onSuccess: (data) => qc.setQueryData(['waveform', playerTrack?.id], (old: typeof waveData) =>
+      old ? { ...old, beat_times_ms: data.beat_positions_ms } : old
+    ),
+  })
+
+  // Load track into audio element
   useEffect(() => {
     if (!playerTrack) return
     const audio = getAudio()
@@ -150,8 +207,11 @@ export default function Player() {
     if (!audio.src.endsWith(playerTrack.id + '/stream')) {
       audio.src = url
       audio.load()
+      viewStartMsRef.current = 0
+      zoomPxPerMsRef.current = 0
+      manualScrollRef.current = false
     }
-    const onDuration = () => setDurationMs(audio.duration * 1000)
+    const onDuration = () => { setDurationMs(audio.duration * 1000); durationMsRef.current = audio.duration * 1000 }
     const onPlay = () => { setPlaying(true); setPlayerPlaying(true) }
     const onPause = () => { setPlaying(false); setPlayerPlaying(false) }
     const onEnded = () => { setPlaying(false); setPlayerPlaying(false) }
@@ -159,116 +219,278 @@ export default function Player() {
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
     audio.addEventListener('ended', onEnded)
-    if (audio.duration) setDurationMs(audio.duration * 1000)
+    if (audio.duration) { setDurationMs(audio.duration * 1000); durationMsRef.current = audio.duration * 1000 }
     return () => {
       audio.removeEventListener('durationchange', onDuration)
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('ended', onEnded)
     }
-  }, [playerTrack])
+  }, [playerTrack, setPlayerPlaying])
 
-  // ResizeObserver
-  useEffect(() => {
-    if (!containerRef.current) return
-    const ro = new ResizeObserver((e) => setContainerW(e[0].contentRect.width))
-    ro.observe(containerRef.current)
-    return () => ro.disconnect()
-  }, [])
-
-  // Animation loop — updates progress bar and waveform via direct DOM/canvas (no React state)
+  // rAF draw loop
   const draw = useCallback(() => {
     const audio = getAudio()
     const nowMs = audio.currentTime * 1000
-    const durMs = audio.duration ? audio.duration * 1000 : durationMs
-    const pct = durMs > 0 ? (nowMs / durMs) * 100 : 0
+    const durMs = durationMsRef.current || durationMs
 
-    // Direct DOM updates — avoids 60fps React re-renders
-    if (progressBarRef.current) {
-      progressBarRef.current.style.width = pct + '%'
+    // Progress bar + time (direct DOM)
+    if (progressBarRef.current && durMs > 0) {
+      progressBarRef.current.style.width = ((nowMs / durMs) * 100) + '%'
     }
-    if (timeRef.current) {
-      timeRef.current.textContent = formatDuration(nowMs)
-    }
+    if (timeRef.current) timeRef.current.textContent = formatDuration(nowMs)
 
-    // Redraw waveform canvas
     const canvas = canvasRef.current
-    if (canvas && waveData?.detail?.length) {
-      const ctx = canvas.getContext('2d')
-      const W = containerW
-      const H = WAVEFORM_H
-      const dpr = window.devicePixelRatio || 1
-      if (canvas.width !== Math.round(W * dpr)) {
-        canvas.width = Math.round(W * dpr)
-        canvas.height = Math.round(H * dpr)
-        canvas.style.width = W + 'px'
-        canvas.style.height = H + 'px'
-        ctx!.scale(dpr, dpr)
+    if (!canvas || !playerExpanded) {
+      rafRef.current = requestAnimationFrame(draw)
+      return
+    }
+
+    // Resize canvas buffer to actual displayed size
+    const W = canvas.clientWidth || 800
+    const H = WAVEFORM_H
+    const dpr = window.devicePixelRatio || 1
+    const bw = Math.round(W * dpr)
+    const bh = Math.round(H * dpr)
+    if (canvas.width !== bw || canvas.height !== bh) {
+      canvas.width = bw
+      canvas.height = bh
+      const c = canvas.getContext('2d')
+      c?.scale(dpr, dpr)
+    }
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx || !durMs) {
+      rafRef.current = requestAnimationFrame(draw)
+      return
+    }
+
+    // Calculate visible window
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+
+    // Auto-follow playhead while playing (unless user has manually scrolled)
+    if (!manualScrollRef.current || (audio.paused === false)) {
+      if (!manualScrollRef.current) {
+        viewStartMsRef.current = nowMs - visMs / 2
       }
-      if (ctx) {
-        drawWaveform(ctx, W, H, waveData.detail, nowMs, durMs, waveData.beat_times_ms ?? [], cues)
-      }
+    }
+    viewStartMsRef.current = Math.max(0, Math.min(viewStartMsRef.current, durMs - visMs))
+
+    if (waveData?.detail?.length) {
+      drawWaveform(
+        ctx, W, H,
+        waveData.detail, nowMs, durMs,
+        viewStartMsRef.current, visMs,
+        beatTimesMs, cues, pxPerMs,
+      )
+    } else {
+      ctx.clearRect(0, 0, W, H)
+      ctx.fillStyle = '#0a0a0a'
+      ctx.fillRect(0, 0, W, H)
+      ctx.fillStyle = 'rgba(255,255,255,0.3)'
+      ctx.font = '12px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText(
+        playerTrack?.analysis_state !== 'complete' ? `Analysis ${playerTrack?.analysis_state}…` : 'Loading waveform…',
+        W / 2, H / 2
+      )
+      ctx.textAlign = 'left'
     }
 
     rafRef.current = requestAnimationFrame(draw)
-  }, [waveData, durationMs, cues, containerW])
+  }, [waveData, durationMs, beatTimesMs, cues, playerExpanded, playerTrack])
 
   useEffect(() => {
     rafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(rafRef.current)
   }, [draw])
 
-  function handleCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    const rect = canvasRef.current!.getBoundingClientRect()
-    const pct = (e.clientX - rect.left) / rect.width
-    const audio = getAudio()
-    const durMs = audio.duration ? audio.duration * 1000 : durationMs
-    audio.currentTime = Math.max(0, Math.min(pct * durMs, durMs)) / 1000
+  // Scroll wheel: zoom centered on cursor
+  function handleWheel(e: React.WheelEvent<HTMLCanvasElement>) {
+    e.preventDefault()
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    const W = rect.width
+    const durMs = durationMsRef.current || durationMs
+    if (!durMs) return
+
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+    const mouseFrac = (e.clientX - rect.left) / W
+    const msAtMouse = viewStartMsRef.current + mouseFrac * visMs
+
+    const factor = e.deltaY < 0 ? 0.7 : 1.43
+    const newVisMs = Math.max(MIN_VIS_MS, Math.min(durMs, visMs * factor))
+
+    viewStartMsRef.current = Math.max(0, Math.min(msAtMouse - mouseFrac * newVisMs, durMs - newVisMs))
+    zoomPxPerMsRef.current = newVisMs >= durMs ? 0 : W / newVisMs
+    manualScrollRef.current = true
   }
 
-  function seekFromProgressBar(e: React.MouseEvent<HTMLDivElement>) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const pct = (e.clientX - rect.left) / rect.width
-    const audio = getAudio()
-    const durMs = audio.duration ? audio.duration * 1000 : durationMs
-    audio.currentTime = Math.max(0, pct * durMs) / 1000
+  // Click/drag on canvas: click=seek, drag=pan
+  function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (e.button !== 0) return
+    dragRef.current = { startX: e.clientX, startViewMs: viewStartMsRef.current, moved: false }
+  }
+
+  function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!dragRef.current || e.buttons !== 1) return
+    const dx = e.clientX - dragRef.current.startX
+    if (Math.abs(dx) > 4) {
+      dragRef.current.moved = true
+      manualScrollRef.current = true
+      const canvas = canvasRef.current!
+      const W = canvas.clientWidth
+      const durMs = durationMsRef.current || durationMs
+      const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+      const visMs = W / pxPerMs
+      viewStartMsRef.current = Math.max(0, Math.min(
+        dragRef.current.startViewMs - dx / pxPerMs,
+        durMs - visMs
+      ))
+    }
+  }
+
+  function handleMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!dragRef.current) return
+    const wasDrag = dragRef.current.moved
+    dragRef.current = null
+    if (!wasDrag && e.button === 0) {
+      // It was a click — seek
+      seekAtX(e.clientX)
+    }
+  }
+
+  function seekAtX(clientX: number) {
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    const W = rect.width
+    const durMs = durationMsRef.current || durationMs
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+    const frac = (clientX - rect.left) / W
+    const ms = viewStartMsRef.current + frac * visMs
+    getAudio().currentTime = Math.max(0, Math.min(ms, durMs)) / 1000
+  }
+
+  function msAtClientX(clientX: number): number {
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    const W = rect.width
+    const durMs = durationMsRef.current || durationMs
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+    const frac = (clientX - rect.left) / W
+    return viewStartMsRef.current + frac * visMs
+  }
+
+  function findNearestCue(clientX: number): Cue | undefined {
+    const canvas = canvasRef.current!
+    const rect = canvas.getBoundingClientRect()
+    const W = rect.width
+    const durMs = durationMsRef.current || durationMs
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+    const msPx = (ms: number) => ((ms - viewStartMsRef.current) / visMs) * W + rect.left
+    return cues.find((c) => Math.abs(msPx(c.position_ms) - clientX) < CUE_HIT_PX)
+  }
+
+  function handleContextMenu(e: React.MouseEvent<HTMLCanvasElement>) {
+    e.preventDefault()
+    const ms = msAtClientX(e.clientX)
+    const near = findNearestCue(e.clientX)
+    setCtxMenu({ x: e.clientX, y: e.clientY, ms, nearCueId: near?.id })
+    setCueLabel('')
+  }
+
+  function resetZoom() {
+    zoomPxPerMsRef.current = 0
+    viewStartMsRef.current = 0
+    manualScrollRef.current = false
+  }
+
+  function zoomIn() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const W = canvas.clientWidth
+    const durMs = durationMsRef.current || durationMs
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+    const nowMs = getAudio().currentTime * 1000
+    const newVisMs = Math.max(MIN_VIS_MS, visMs * 0.5)
+    viewStartMsRef.current = Math.max(0, Math.min(nowMs - newVisMs / 2, durMs - newVisMs))
+    zoomPxPerMsRef.current = W / newVisMs
+    manualScrollRef.current = false // re-engage auto-follow
+  }
+
+  function zoomOut() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const W = canvas.clientWidth
+    const durMs = durationMsRef.current || durationMs
+    const pxPerMs = zoomPxPerMsRef.current > 0 ? zoomPxPerMsRef.current : (W / durMs)
+    const visMs = W / pxPerMs
+    const newVisMs = Math.min(durMs, visMs * 2)
+    zoomPxPerMsRef.current = newVisMs >= durMs ? 0 : W / newVisMs
+    if (newVisMs >= durMs) {
+      viewStartMsRef.current = 0
+      manualScrollRef.current = false
+    }
   }
 
   function togglePlay() {
     const a = getAudio()
-    if (a.paused) a.play()
+    if (a.paused) { a.play(); manualScrollRef.current = false }
     else a.pause()
   }
   function stop() {
     const a = getAudio()
-    a.pause()
-    a.currentTime = 0
+    a.pause(); a.currentTime = 0
+    viewStartMsRef.current = 0
+    manualScrollRef.current = false
   }
   function unload() {
     const a = getAudio()
-    a.pause()
-    a.src = ''
-    setPlayerTrack(null)
-    setPlaying(false)
-    setDurationMs(0)
+    a.pause(); a.src = ''
+    setPlayerTrack(null); setPlaying(false); setDurationMs(0)
+    durationMsRef.current = 0
   }
 
   if (!playerTrack) return null
 
   return (
-    <div className="flex-shrink-0 border-b border-xkc-border bg-[#0d0d0d]">
-      {/* Waveform canvas — only when expanded */}
+    <div className="flex-shrink-0 border-b border-xkc-border bg-[#0a0a0a]">
+      {/* Waveform canvas */}
       {playerExpanded && (
-        <div ref={containerRef} className="relative w-full cursor-crosshair" style={{ height: WAVEFORM_H }}>
+        <div className="relative w-full" style={{ height: WAVEFORM_H }}>
           <canvas
             ref={canvasRef}
-            onClick={handleCanvasClick}
-            title="Click to seek"
-            style={{ display: 'block', width: '100%', height: WAVEFORM_H }}
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={() => { dragRef.current = null }}
+            onContextMenu={handleContextMenu}
+            title="Scroll to zoom · Drag to pan · Click to seek · Right-click for cue options"
+            style={{ display: 'block', width: '100%', height: WAVEFORM_H, cursor: 'crosshair' }}
           />
-          {!waveData?.detail?.length && (
-            <div className="absolute inset-0 flex items-center justify-center text-xs text-xkc-muted pointer-events-none">
-              {playerTrack.analysis_state !== 'complete' ? `Analysis ${playerTrack.analysis_state}…` : 'Loading waveform…'}
+          {/* Zoom controls overlay */}
+          <div className="absolute top-1 right-1 flex gap-1">
+            <button onClick={zoomIn} className="p-1 bg-black/50 rounded text-xkc-muted hover:text-white" title="Zoom in"><ZoomIn size={11} /></button>
+            <button onClick={zoomOut} className="p-1 bg-black/50 rounded text-xkc-muted hover:text-white" title="Zoom out"><ZoomOut size={11} /></button>
+            <button onClick={resetZoom} className="px-1.5 py-0.5 bg-black/50 rounded text-[9px] text-xkc-muted hover:text-white" title="Reset zoom">1:1</button>
+          </div>
+          {/* Beat nudge controls overlay (visible only when beat data exists) */}
+          {beatTimesMs.length > 0 && (
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/70 rounded-lg px-2 py-1">
+              <span className="text-[9px] text-xkc-muted mr-1">Beats</span>
+              {([-10, -2, -0.5, 0.5, 2, 10] as const).map((n) => (
+                <button key={n} onClick={() => nudgeBeats.mutate(n)}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-xkc-surface border border-xkc-border text-xkc-muted hover:text-white hover:border-xkc-accent font-mono">
+                  {n > 0 ? `+${n}` : n}ms
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -276,7 +498,6 @@ export default function Player() {
 
       {/* Control bar */}
       <div className="flex items-center gap-2 px-3 h-12 border-t border-xkc-border/30">
-        {/* Transport */}
         <button onClick={togglePlay}
           className="w-8 h-8 rounded-full bg-xkc-accent flex items-center justify-center hover:bg-blue-600 flex-shrink-0">
           {playing ? <Pause size={14} className="text-white" /> : <Play size={14} className="text-white ml-0.5" />}
@@ -285,20 +506,21 @@ export default function Player() {
           <Square size={12} />
         </button>
 
-        {/* Time */}
         <span ref={timeRef} className="text-xs font-mono text-xkc-text flex-shrink-0 w-12">0:00</span>
         <span className="text-xs font-mono text-xkc-muted flex-shrink-0">/</span>
         <span className="text-xs font-mono text-xkc-muted flex-shrink-0">{formatDuration(durationMs)}</span>
 
-        {/* Progress bar */}
-        <div
-          className="flex-1 h-1.5 bg-xkc-border rounded-full cursor-pointer relative"
-          onClick={seekFromProgressBar}
-        >
+        <div className="flex-1 h-1.5 bg-xkc-border rounded-full cursor-pointer relative"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            const pct = (e.clientX - r.left) / r.width
+            const durMs = durationMsRef.current || durationMs
+            getAudio().currentTime = pct * durMs / 1000
+            manualScrollRef.current = false
+          }}>
           <div ref={progressBarRef} className="h-full bg-xkc-accent rounded-full" style={{ width: '0%' }} />
         </div>
 
-        {/* Track info */}
         <div className="flex items-center gap-2 flex-shrink-0 min-w-0 max-w-xs">
           <span className="text-xs text-xkc-text truncate">
             {playerTrack.artist && `${playerTrack.artist} — `}{playerTrack.title || 'Unknown'}
@@ -307,34 +529,27 @@ export default function Player() {
           {playerTrack.key_camelot && <span className="text-xs text-xkc-muted flex-shrink-0">{playerTrack.key_camelot}</span>}
         </div>
 
-        {/* Add cue at current position */}
+        {/* Add cue at playhead */}
         <button
-          onClick={() => {
-            const a = getAudio()
-            addCue.mutate(a.currentTime * 1000)
-          }}
+          onClick={() => { const a = getAudio(); addCue.mutate({ posMs: a.currentTime * 1000, label: '' }) }}
           className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-xkc-border text-xkc-muted hover:text-xkc-text hover:border-xkc-accent flex-shrink-0"
           title="Add cue at playhead"
         >
           <Plus size={10} /> Cue
         </button>
 
-        {/* Cue buttons */}
+        {/* Cue jump buttons */}
         {cues.slice(0, 6).map((cue, i) => (
           <button
             key={cue.id}
-            onClick={() => { getAudio().currentTime = cue.position_ms / 1000 }}
+            onClick={() => { getAudio().currentTime = cue.position_ms / 1000; manualScrollRef.current = false }}
             className="text-xs px-1.5 py-0.5 rounded flex-shrink-0 font-mono"
             style={{ borderWidth: 1, borderStyle: 'solid', borderColor: hexColor(cue.color), color: hexColor(cue.color) }}
             title={`${cue.label || `Cue ${i + 1}`} — ${formatDuration(cue.position_ms)}`}
-          >
-            {i + 1}
-          </button>
+          >{i + 1}</button>
         ))}
 
-        <button onClick={unload} className="p-1.5 text-xkc-muted hover:text-red-400 flex-shrink-0" title="Unload">
-          <X size={13} />
-        </button>
+        <button onClick={unload} className="p-1.5 text-xkc-muted hover:text-red-400 flex-shrink-0" title="Unload"><X size={13} /></button>
         <button
           onClick={() => setPlayerExpanded(!playerExpanded)}
           className="p-1.5 text-xkc-muted hover:text-xkc-text flex-shrink-0"
@@ -343,6 +558,53 @@ export default function Player() {
           {playerExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
+
+      {/* Right-click context menu on waveform */}
+      {ctxMenu && (
+        <div
+          className="fixed z-50 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl py-1 min-w-[200px] text-sm"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1 text-xs text-xkc-muted border-b border-xkc-border mb-1">
+            {formatDuration(ctxMenu.ms)}
+          </div>
+          <div className="px-3 py-1.5">
+            <div className="text-xs text-xkc-muted mb-1">Add hot cue</div>
+            <div className="flex gap-1">
+              <input
+                autoFocus
+                value={cueLabel}
+                onChange={(e) => setCueLabel(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addCue.mutate({ posMs: ctxMenu.ms, label: cueLabel }) }}
+                placeholder="Label (optional)"
+                className="flex-1 bg-xkc-bg border border-xkc-border rounded px-2 py-1 text-xs text-xkc-text focus:outline-none focus:border-xkc-accent"
+              />
+              <button
+                onClick={() => addCue.mutate({ posMs: ctxMenu.ms, label: cueLabel })}
+                className="px-2 py-1 bg-xkc-accent hover:bg-blue-600 text-white rounded text-xs"
+              >Add</button>
+            </div>
+          </div>
+          {ctxMenu.nearCueId && (
+            <>
+              <div className="border-t border-xkc-border my-1" />
+              <button
+                className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-red-400 text-sm"
+                onClick={() => deleteCue.mutate(ctxMenu.nearCueId!)}
+              >Remove nearest cue</button>
+            </>
+          )}
+          <div className="border-t border-xkc-border my-1" />
+          <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-muted text-sm"
+            onClick={() => { getAudio().currentTime = ctxMenu.ms / 1000; setCtxMenu(null) }}>
+            Seek here
+          </button>
+        </div>
+      )}
+
+      {/* Dismiss context menu on click elsewhere */}
+      {ctxMenu && <div className="fixed inset-0 z-40" onClick={() => setCtxMenu(null)} />}
     </div>
   )
 }
