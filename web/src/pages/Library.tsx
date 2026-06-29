@@ -9,7 +9,7 @@ import TrackDetail from '../components/TrackDetail'
 import UploadZone from '../components/UploadZone'
 import ActivityLog from '../components/ActivityLog'
 import Player from '../components/Player'
-import { Search, Upload, Settings, Users, LogOut, Download, ChevronDown, X, SlidersHorizontal } from 'lucide-react'
+import { Search, Upload, Settings, Users, LogOut, Download, ChevronDown, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 export default function Library() {
@@ -22,7 +22,6 @@ export default function Library() {
 
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const [filterOpen, setFilterOpen] = useState(false)
   const [exportModal, setExportModal] = useState(false)
   const [selectedForExport, setSelectedForExport] = useState<string[]>([])
   const [exportJobId, setExportJobId] = useState<string | null>(null)
@@ -118,20 +117,6 @@ export default function Library() {
             />
           </div>
 
-          {/* Filter chips */}
-          <button
-            onClick={() => setFilterOpen(!filterOpen)}
-            className={cn(
-              'flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors',
-              Object.values(filters).some(Boolean)
-                ? 'border-xkc-accent text-xkc-accent bg-xkc-accent/10'
-                : 'border-xkc-border text-xkc-muted hover:text-xkc-text'
-            )}
-          >
-            <SlidersHorizontal size={12} />
-            Filters
-          </button>
-
           {/* Export button */}
           <button
             onClick={() => setExportModal(true)}
@@ -193,42 +178,6 @@ export default function Library() {
           </div>
         </header>
 
-        {/* Filter bar */}
-        {filterOpen && (
-          <div className="flex items-center gap-3 px-4 py-2 border-b border-xkc-border bg-xkc-surface/50 text-xs flex-shrink-0">
-            <span className="text-xkc-muted">BPM:</span>
-            <input
-              type="number" placeholder="Min" value={filters.minBpm || ''}
-              onChange={(e) => setFilters({ ...filters, minBpm: Number(e.target.value) || undefined })}
-              className="w-16 bg-xkc-bg border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none focus:border-xkc-accent"
-            />
-            <span className="text-xkc-muted">–</span>
-            <input
-              type="number" placeholder="Max" value={filters.maxBpm || ''}
-              onChange={(e) => setFilters({ ...filters, maxBpm: Number(e.target.value) || undefined })}
-              className="w-16 bg-xkc-bg border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none focus:border-xkc-accent"
-            />
-            <span className="text-xkc-muted ml-2">Key:</span>
-            <input
-              type="text" placeholder="8A" value={filters.keyCamelot || ''}
-              onChange={(e) => setFilters({ ...filters, keyCamelot: e.target.value || undefined })}
-              className="w-14 bg-xkc-bg border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none focus:border-xkc-accent"
-            />
-            <span className="text-xkc-muted ml-2">Genre:</span>
-            <input
-              type="text" placeholder="Techno" value={filters.genre || ''}
-              onChange={(e) => setFilters({ ...filters, genre: e.target.value || undefined })}
-              className="w-24 bg-xkc-bg border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none focus:border-xkc-accent"
-            />
-            <button
-              onClick={() => { setFilters({}); setFilterOpen(false) }}
-              className="ml-auto text-xkc-muted hover:text-xkc-text"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
         {/* Main layout */}
         <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
           <Sidebar
@@ -242,15 +191,36 @@ export default function Library() {
             <div className="flex-1 overflow-hidden flex flex-col">
               {/* Waveform player — top of center panel, Rekordbox-style */}
               <Player />
-              {/* Track count */}
-              <div className="px-3 py-1.5 border-b border-xkc-border text-xs text-xkc-muted bg-xkc-surface/50 flex-shrink-0 flex items-center gap-2">
+              {/* Track count + active filter chips */}
+              <div className="px-3 py-1.5 border-b border-xkc-border text-xs text-xkc-muted bg-xkc-surface/50 flex-shrink-0 flex items-center gap-2 flex-wrap">
                 <span>{isLoading ? 'Loading…' : `${tracks.length} tracks`}</span>
                 {filters.artist && (
-                  <button
-                    onClick={() => setFilters({ ...filters, artist: undefined })}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30"
-                  >
-                    {filters.artist} ×
+                  <button onClick={() => setFilters({ ...filters, artist: undefined })}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30">
+                    Artist: {filters.artist} <X size={10} />
+                  </button>
+                )}
+                {filters.genre && (
+                  <button onClick={() => setFilters({ ...filters, genre: undefined })}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30">
+                    Genre: {filters.genre} <X size={10} />
+                  </button>
+                )}
+                {filters.keyCamelot && (
+                  <button onClick={() => setFilters({ ...filters, keyCamelot: undefined })}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30">
+                    Key: {filters.keyCamelot} <X size={10} />
+                  </button>
+                )}
+                {(filters.minBpm || filters.maxBpm) && (
+                  <button onClick={() => setFilters({ ...filters, minBpm: undefined, maxBpm: undefined })}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30">
+                    BPM: {filters.minBpm ?? ''}–{filters.maxBpm ?? ''} <X size={10} />
+                  </button>
+                )}
+                {Object.values(filters).some(Boolean) && (
+                  <button onClick={() => setFilters({})} className="text-xkc-muted hover:text-red-400 ml-auto">
+                    Clear all
                   </button>
                 )}
               </div>
@@ -265,7 +235,6 @@ export default function Library() {
                 }}
                 onDeleteTrack={(id) => deleteTrack.mutate(id)}
                 onReanalyze={(id) => reanalyze.mutate(id)}
-                onFilterByArtist={(a) => setFilters({ ...filters, artist: a })}
               />
             </div>
 
