@@ -231,6 +231,8 @@ export default function Library() {
 
           <main className="flex-1 flex overflow-hidden">
             <div className="flex-1 overflow-hidden flex flex-col">
+              {/* Waveform player — top of center panel, Rekordbox-style */}
+              <Player />
               {/* Track count */}
               <div className="px-3 py-1.5 border-b border-xkc-border text-xs text-xkc-muted bg-xkc-surface/50 flex-shrink-0">
                 {isLoading ? 'Loading…' : `${tracks.length} tracks`}
@@ -311,9 +313,6 @@ export default function Library() {
           </div>
         )}
       </div>
-
-      {/* Waveform player — docked at bottom */}
-      <Player />
 
       <style>{`
         .menu-item {

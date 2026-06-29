@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { Track, Tag } from '../lib/api'
 import { api } from '../lib/api'
@@ -19,8 +20,7 @@ interface TrackTableProps {
   onReanalyze?: (trackId: string) => void
 }
 
-// cols: play | mini-wave | title | artist | bpm | key | time | genre | tags | rating | added
-const COLS = '[32px_100px_1fr_1fr_58px_46px_52px_72px_90px_66px_82px]'
+const COL_STYLE = '32px 96px 1fr 1fr 58px 46px 52px 72px 90px 66px 82px'
 
 function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -36,30 +36,32 @@ function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: bool
     if (!canvas || !data?.overview?.length) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    const W = 100, H = 24
+
+    const W = 96, H = 24, BAR_W = 2, GAP = 1
     const dpr = window.devicePixelRatio || 1
-    canvas.width = W * dpr; canvas.height = H * dpr
-    canvas.style.width = W + 'px'; canvas.style.height = H + 'px'
+    canvas.width = W * dpr
+    canvas.height = H * dpr
+    canvas.style.width = W + 'px'
+    canvas.style.height = H + 'px'
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, W, H)
+
     const pts = data.overview
-    const max = Math.max(...pts, 0.001)
+    const numBars = Math.floor(W / (BAR_W + GAP))
+    const maxVal = Math.max(...pts, 0.001)
     const midY = H / 2
-    const bw = W / pts.length
-    ctx.fillStyle = isPlaying ? '#3b82f6' : '#334155'
-    pts.forEach((v, i) => {
-      const h = (v / max) * midY * 0.85
-      ctx.fillRect(i * bw, midY - h, Math.max(bw - 0.5, 1), h * 2)
-    })
+
+    for (let i = 0; i < numBars; i++) {
+      const srcIdx = Math.floor((i / numBars) * pts.length)
+      const norm = pts[srcIdx] / maxVal
+      const h = Math.max(norm * midY * 0.9, 1)
+      const x = i * (BAR_W + GAP)
+      ctx.fillStyle = isPlaying ? '#3b82f6' : '#334155'
+      ctx.fillRect(x, midY - h, BAR_W, h * 2)
+    }
   }, [data, isPlaying])
 
-  return (
-    <canvas
-      ref={canvasRef}
-      className="opacity-80"
-      style={{ display: 'block' }}
-    />
-  )
+  return <canvas ref={canvasRef} style={{ display: 'block' }} />
 }
 
 function Stars({ rating }: { rating: number }) {
@@ -84,28 +86,17 @@ export default function TrackTable({
   function handlePlay(e: React.MouseEvent, track: Track) {
     e.stopPropagation()
     if (track.analysis_state !== 'complete') return
-    if (playerTrack?.id === track.id) {
-      // toggle play/pause via audio singleton
-      const audio = (window as unknown as { _xkcAudio?: HTMLAudioElement })._xkcAudio
-      if (audio) {
-        if (audio.paused) audio.play()
-        else audio.pause()
-      }
-    } else {
-      setPlayerTrack(track)
-    }
+    setPlayerTrack(playerTrack?.id === track.id ? null : track)
+    if (playerTrack?.id !== track.id) setPlayerTrack(track)
   }
-
-  // After Player sets the audio element on window, we use it for pause detection
-  const [playingId, setPlayingId] = useState<string | null>(null)
-  useEffect(() => {
-    setPlayingId(playerTrack?.id ?? null)
-  }, [playerTrack])
 
   return (
     <div className="relative flex flex-col h-full" onClick={() => setContextMenu(null)}>
       {/* Header */}
-      <div className={cn('grid gap-x-2 px-3 py-2 border-b border-xkc-border text-xs text-xkc-muted uppercase tracking-wider bg-xkc-surface sticky top-0 z-10', `grid-cols-${COLS}`)}>
+      <div
+        className="grid gap-x-2 px-3 py-2 border-b border-xkc-border text-xs text-xkc-muted uppercase tracking-wider bg-xkc-surface sticky top-0 z-10"
+        style={{ gridTemplateColumns: COL_STYLE }}
+      >
         <div />
         <div>Wave</div>
         <div>Title</div>
@@ -126,7 +117,7 @@ export default function TrackTable({
         )}
         {tracks.map((track) => {
           const isSelected = selectedTrackId === track.id
-          const isPlaying = playingId === track.id
+          const isPlaying = playerTrack?.id === track.id
           const canPlay = track.analysis_state === 'complete'
           return (
             <div
@@ -134,10 +125,11 @@ export default function TrackTable({
               onClick={() => onSelectTrack(track.id)}
               onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, trackId: track.id }) }}
               className={cn(
-                `grid gap-x-2 px-3 py-1.5 border-b border-xkc-border/50 cursor-pointer hover:bg-xkc-surface text-sm items-center grid-cols-${COLS}`,
+                'grid gap-x-2 px-3 py-1.5 border-b border-xkc-border/50 cursor-pointer hover:bg-xkc-surface text-sm items-center',
                 isSelected && 'bg-xkc-surface border-l-2 border-l-xkc-accent',
                 isPlaying && 'bg-blue-950/30'
               )}
+              style={{ gridTemplateColumns: COL_STYLE }}
             >
               {/* Play button */}
               <button
@@ -149,14 +141,13 @@ export default function TrackTable({
                       ? 'bg-xkc-accent text-white hover:bg-blue-600'
                       : 'text-xkc-muted hover:bg-xkc-accent/20 hover:text-xkc-accent'
                     : 'text-xkc-border cursor-default',
-                  track.analysis_state === 'analyzing' && 'text-yellow-500'
                 )}
-                title={!canPlay ? `Analysis ${track.analysis_state}` : isPlaying ? 'Playing' : 'Play'}
+                title={!canPlay ? `Analysis: ${track.analysis_state}` : isPlaying ? 'Playing' : 'Play'}
               >
                 {track.analysis_state === 'analyzing' ? (
                   <Loader2 size={11} className="animate-spin" />
                 ) : track.analysis_state === 'failed' ? (
-                  <span className="text-red-400 text-xs">✗</span>
+                  <span className="text-red-400 text-[10px]">✗</span>
                 ) : isPlaying ? (
                   <Pause size={11} />
                 ) : (
@@ -165,15 +156,13 @@ export default function TrackTable({
               </button>
 
               {/* Mini waveform */}
-              <div className="flex items-center">
-                {canPlay ? (
-                  <MiniWaveform trackId={track.id} isPlaying={isPlaying} />
-                ) : (
-                  <div className="w-[100px] h-6 rounded bg-xkc-border/30 flex items-center justify-center">
-                    <span className="text-[9px] text-xkc-muted">{track.analysis_state}</span>
-                  </div>
-                )}
-              </div>
+              {canPlay ? (
+                <MiniWaveform trackId={track.id} isPlaying={isPlaying} />
+              ) : (
+                <div className="h-6 rounded bg-xkc-border/20 flex items-center px-1">
+                  <span className="text-[9px] text-xkc-muted">{track.analysis_state}</span>
+                </div>
+              )}
 
               <div className="truncate text-xkc-text">{track.title || '—'}</div>
               <div className="truncate text-xkc-muted">{track.artist || '—'}</div>
@@ -184,11 +173,10 @@ export default function TrackTable({
               <div className="flex gap-1 flex-wrap">
                 {(track.tag_ids || []).slice(0, 4).map((tid) => {
                   const tag = tagById[tid]
-                  if (!tag) return null
-                  return (
-                    <span key={tid} className="w-2 h-2 rounded-full flex-shrink-0"
+                  return tag ? (
+                    <span key={tid} className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5"
                       style={{ backgroundColor: hexColor(tag.color) }} title={tag.name} />
-                  )
+                  ) : null
                 })}
               </div>
               <Stars rating={track.rating} />
