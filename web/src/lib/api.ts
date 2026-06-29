@@ -90,6 +90,7 @@ export interface StreamSource {
   last_synced_at: string | null
   mirror_playlist_id: string | null
   created_at: string
+  download_quality?: string
 }
 
 export interface TrackParams {

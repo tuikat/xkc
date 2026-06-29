@@ -132,28 +132,33 @@ def _add_to_playlist(track_id: str, playlist_id: str, db):
 
 def _fetch_spotify_tracklist(url: str) -> list:
     """Use spotdl to list tracks without downloading."""
-    tmp_file = '/tmp/spotdl_list.json'
+    tmp_file = '/tmp/spotdl_list.spotdl'
     try:
-        subprocess.run(
+        result = subprocess.run(
             ['spotdl', 'save', url, '--save-file', tmp_file],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, timeout=120
         )
+        if result.returncode != 0:
+            logger.error(f"spotdl save failed: {result.stderr}")
         if Path(tmp_file).exists():
             with open(tmp_file) as f:
                 data = json.load(f)
+            if not isinstance(data, list):
+                logger.error(f"Unexpected spotdl format: {type(data)}")
+                return []
             return [
                 {
                     'title': t.get('name', ''),
-                    'artist': ', '.join(t.get('artists', [])),
+                    'artist': ', '.join(t.get('artists', [])) if isinstance(t.get('artists'), list) else t.get('artist', ''),
                     'album': t.get('album_name', ''),
-                    'isrc': t.get('isrc'),
+                    'isrc': t.get('isrc') or None,
                     'id': t.get('song_id'),
                     'url': t.get('url'),
                 }
                 for t in data
             ]
     except Exception as e:
-        logger.error(f"Spotify fetch failed: {e}")
+        logger.error(f"Spotify fetch failed: {e}", exc_info=True)
     return []
 
 

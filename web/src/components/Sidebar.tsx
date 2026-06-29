@@ -354,14 +354,17 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
                   placeholder="Source URL"
                   className="w-full bg-xkc-surface border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none focus:border-xkc-accent"
                 />
-                <select
-                  value={editSource.sync_mode ?? src.sync_mode}
-                  onChange={(e) => setEditSource({ ...editSource, sync_mode: e.target.value })}
-                  className="w-full bg-xkc-surface border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none"
-                >
-                  <option value="mirror">Mirror</option>
-                  <option value="import">One-time import</option>
-                </select>
+                <div>
+                  <label className="block text-[10px] text-xkc-muted mb-0.5">Playlist destination</label>
+                  <select
+                    value={(editSource.mirror_playlist_id !== undefined ? editSource.mirror_playlist_id : src.mirror_playlist_id) ?? ''}
+                    onChange={e => setEditSource({ ...editSource, mirror_playlist_id: e.target.value || null })}
+                    className="w-full bg-xkc-surface border border-xkc-border rounded px-2 py-1 text-xkc-text focus:outline-none text-xs"
+                  >
+                    <option value="">Library only (All Tracks)</option>
+                    {playlists.map(pl => <option key={pl.id} value={pl.id}>{pl.name}</option>)}
+                  </select>
+                </div>
                 <label className="flex items-center gap-2 px-1 text-xkc-muted cursor-pointer">
                   <input
                     type="checkbox"
@@ -393,19 +396,36 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between px-1 py-1 text-xs text-xkc-muted hover:text-xkc-text group cursor-pointer"
-                onClick={() => { setEditingSourceId(src.id); setEditSource({}) }}>
-                <div className="flex items-center gap-1.5 truncate">
-                  <Radio size={12} className="flex-shrink-0" />
-                  <span className="truncate">{src.display_name}</span>
+              <div>
+                <div className="flex items-center justify-between px-1 py-1 text-xs text-xkc-muted hover:text-xkc-text group cursor-pointer"
+                  onClick={() => { setEditingSourceId(src.id); setEditSource({}) }}>
+                  <div className="flex items-center gap-1.5 truncate">
+                    <Radio size={12} className="flex-shrink-0" />
+                    <span className="truncate">{src.display_name}</span>
+                  </div>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 text-xkc-muted hover:text-xkc-accent flex-shrink-0"
+                    onClick={(e) => { e.stopPropagation(); syncSource.mutate(src.id) }}
+                    title="Sync now"
+                  >
+                    <RefreshCw size={12} className={syncSource.isPending ? 'animate-spin' : ''} />
+                  </button>
                 </div>
-                <button
-                  className="opacity-0 group-hover:opacity-100 text-xkc-muted hover:text-xkc-accent flex-shrink-0"
-                  onClick={(e) => { e.stopPropagation(); syncSource.mutate(src.id) }}
-                  title="Sync now"
-                >
-                  <RefreshCw size={12} className={syncSource.isPending ? 'animate-spin' : ''} />
-                </button>
+                {src.mirror_playlist_id && (() => {
+                  const pl = playlists.find(p => p.id === src.mirror_playlist_id)
+                  return pl ? (
+                    <button
+                      onClick={() => onPlaylistSelect(pl.id)}
+                      className={cn(
+                        'w-full flex items-center gap-1.5 pl-5 pr-2 py-0.5 text-[11px] rounded transition-colors truncate',
+                        selectedPlaylistId === pl.id ? 'text-xkc-accent bg-xkc-accent/10' : 'text-xkc-muted hover:text-xkc-text'
+                      )}
+                    >
+                      <span className="truncate">{pl.name}</span>
+                      <span className="flex-shrink-0 text-[9px] opacity-50">{pl.track_count}</span>
+                    </button>
+                  ) : null
+                })()}
               </div>
             )}
           </div>

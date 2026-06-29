@@ -13,3 +13,21 @@ body {
 ::-webkit-scrollbar-thumb:hover { @apply bg-xkc-muted; }
 
 * { box-sizing: border-box; }
+
+/* Horizontally scrollable chip row — clips and fades right, scrolls on hover */
+.chip-row {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  gap: 4px;
+  align-items: center;
+  -webkit-mask-image: linear-gradient(to right, black 75%, transparent 100%);
+  mask-image: linear-gradient(to right, black 75%, transparent 100%);
+  scrollbar-width: none;
+}
+.chip-row:hover {
+  overflow-x: auto;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.chip-row::-webkit-scrollbar { display: none; }

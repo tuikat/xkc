@@ -121,7 +121,7 @@ def update_source(
     ).first()
     if not source:
         raise HTTPException(status_code=404, detail="Stream source not found")
-    allowed = {"display_name", "sync_mode", "auto_sync", "sync_interval_hours", "download_quality"}
+    allowed = {"display_name", "sync_mode", "auto_sync", "sync_interval_hours", "download_quality", "mirror_playlist_id"}
     for k, v in body.items():
         if k in allowed:
             setattr(source, k, v)

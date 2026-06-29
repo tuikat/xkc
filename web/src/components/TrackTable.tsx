@@ -224,7 +224,7 @@ export default function TrackTable({
         const chips = splitChips(track.artist)
         if (!chips.length) return <span className="text-xkc-muted">—</span>
         return (
-          <div className="flex flex-wrap gap-1 min-w-0">
+          <div className="chip-row w-full">
             {chips.map(a => (
               <button
                 key={a}
@@ -290,7 +290,7 @@ export default function TrackTable({
           )
         }
         return (
-          <div className="flex flex-wrap gap-1 min-w-0">
+          <div className="chip-row w-full">
             {chips.map(g => (
               <button
                 key={g}
