@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { Track, Cue, TagGroup } from '../lib/api'
-import Waveform from './Waveform'
 import { X, Plus, Trash2, Loader2 } from 'lucide-react'
 import { formatDuration, hexColor } from '../lib/utils'
 import { cn } from '../lib/utils'
@@ -13,21 +12,46 @@ interface TrackDetailProps {
   tagGroups: TagGroup[]
 }
 
+function splitChips(str: string | null | undefined): string[] {
+  if (!str) return []
+  const seen = new Set<string>()
+  return str.split(',').map(s => s.trim()).filter(s => {
+    if (!s) return false
+    const l = s.toLowerCase()
+    if (seen.has(l)) return false
+    seen.add(l)
+    return true
+  })
+}
+
+function mergeArtists(artist: string | null, albumArtist: string | null): string[] {
+  const seen = new Set<string>()
+  return [...splitChips(artist), ...splitChips(albumArtist)].filter(a => {
+    const l = a.toLowerCase()
+    if (seen.has(l)) return false
+    seen.add(l)
+    return true
+  })
+}
+
 export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetailProps) {
   const qc = useQueryClient()
   const { data: track, isLoading } = useQuery({
     queryKey: ['track', trackId],
     queryFn: () => api.tracks.getTrack(trackId),
   })
-  const { data: waveform } = useQuery({
-    queryKey: ['waveform', trackId],
-    queryFn: () => api.tracks.getWaveform(trackId),
-    enabled: !!track && track.analysis_state === 'complete',
-  })
 
   const [editData, setEditData] = useState<Partial<Track>>({})
   const [isDirty, setIsDirty] = useState(false)
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+
+  // Genre chip editing
+  const [addingGenre, setAddingGenre] = useState(false)
+  const [genreInput, setGenreInput] = useState('')
+
+  // Per-group new tag creation
+  const [addingTagToGroup, setAddingTagToGroup] = useState<string | null>(null)
+  const [newTagName, setNewTagName] = useState('')
 
   useEffect(() => {
     if (track) {
@@ -35,8 +59,6 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
         title: track.title || '',
         artist: track.artist || '',
         album: track.album || '',
-        album_artist: track.album_artist || '',
-        genre: track.genre || '',
         label: track.label || '',
         remixer: track.remixer || '',
         year: track.year || undefined,
@@ -74,6 +96,19 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
     onSuccess: () => qc.invalidateQueries({ queryKey: ['track', trackId] }),
   })
 
+  const createTag = useMutation({
+    mutationFn: ({ groupId, name }: { groupId: string; name: string }) =>
+      api.tags.createTag({ group_id: groupId, name }),
+    onSuccess: (newTag) => {
+      qc.invalidateQueries({ queryKey: ['tagGroups'] })
+      const next = [...selectedTagIds, newTag.id]
+      setSelectedTagIds(next)
+      setTags.mutate(next)
+      setAddingTagToGroup(null)
+      setNewTagName('')
+    },
+  })
+
   function field(key: keyof Track, label: string, type = 'text') {
     return (
       <div key={key}>
@@ -81,7 +116,10 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
         <input
           type={type}
           value={String(editData[key] ?? '')}
-          onChange={(e) => { setEditData((d) => ({ ...d, [key]: type === 'number' ? Number(e.target.value) : e.target.value })); setIsDirty(true) }}
+          onChange={e => {
+            setEditData(d => ({ ...d, [key]: type === 'number' ? Number(e.target.value) : e.target.value }))
+            setIsDirty(true)
+          }}
           className="w-full bg-xkc-bg border border-xkc-border rounded px-2 py-1.5 text-xs text-xkc-text focus:outline-none focus:border-xkc-accent"
         />
       </div>
@@ -90,11 +128,35 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
 
   function toggleTag(tagId: string) {
     const next = selectedTagIds.includes(tagId)
-      ? selectedTagIds.filter((id) => id !== tagId)
+      ? selectedTagIds.filter(id => id !== tagId)
       : [...selectedTagIds, tagId]
     setSelectedTagIds(next)
     setTags.mutate(next)
   }
+
+  // Genre chips (read from live track data, saved immediately)
+  const genreChips = useMemo(() => splitChips(track?.genre), [track?.genre])
+
+  function saveGenre(chips: string[]) {
+    const genre = chips.join(', ') || null
+    updateTrack.mutate({ genre } as Partial<Track>)
+  }
+
+  function addGenreChip(name: string) {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    if (genreChips.some(g => g.toLowerCase() === trimmed.toLowerCase())) return
+    saveGenre([...genreChips, trimmed])
+    setAddingGenre(false)
+    setGenreInput('')
+  }
+
+  function removeGenreChip(chip: string) {
+    saveGenre(genreChips.filter(g => g.toLowerCase() !== chip.toLowerCase()))
+  }
+
+  // Merged artist chips for display
+  const artistChips = useMemo(() => mergeArtists(track?.artist ?? null, track?.album_artist ?? null), [track?.artist, track?.album_artist])
 
   if (isLoading) {
     return (
@@ -134,27 +196,42 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
           <span className="ml-2 text-xs text-xkc-muted">{formatDuration(track.duration_ms)}</span>
         </div>
 
-        {/* Waveform */}
-        {waveform?.overview && waveform.overview.length > 0 && (
-          <div className="px-3 py-2">
-            <Waveform data={waveform.overview} width={288} height={60} cues={track.cues} />
-          </div>
-        )}
-
         {/* Metadata */}
         <div className="px-3 pb-3 space-y-2 border-b border-xkc-border">
-          <div className="text-xs text-xkc-muted uppercase tracking-wider mb-2">Metadata</div>
+          <div className="text-xs text-xkc-muted uppercase tracking-wider mb-2 pt-2">Metadata</div>
+
           {field('title', 'Title')}
-          {field('artist', 'Artist')}
+
+          {/* Artist — merged chips + editable field */}
+          <div>
+            <label className="block text-xs text-xkc-muted mb-1">Artists</label>
+            {artistChips.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {artistChips.map(a => (
+                  <span key={a} className="text-[11px] px-1.5 py-0.5 rounded-full border border-xkc-border/60 text-xkc-muted leading-tight">
+                    {a}
+                  </span>
+                ))}
+              </div>
+            )}
+            <input
+              type="text"
+              value={String(editData.artist ?? '')}
+              onChange={e => { setEditData(d => ({ ...d, artist: e.target.value })); setIsDirty(true) }}
+              placeholder="comma-separated artists"
+              className="w-full bg-xkc-bg border border-xkc-border rounded px-2 py-1.5 text-xs text-xkc-text focus:outline-none focus:border-xkc-accent"
+            />
+          </div>
+
           {field('album', 'Album')}
-          {field('album_artist', 'Album Artist')}
-          {field('genre', 'Genre')}
           {field('label', 'Label')}
           {field('remixer', 'Remixer')}
+
           <div className="grid grid-cols-2 gap-2">
             {field('year', 'Year', 'number')}
             {field('bpm', 'BPM', 'number')}
           </div>
+
           {field('key_camelot', 'Key (Camelot)')}
           {field('comment', 'Comment')}
 
@@ -175,12 +252,12 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
             <div className="text-xs text-xkc-muted uppercase tracking-wider">Cue Points</div>
             <button
               className="text-xkc-muted hover:text-xkc-accent"
-              onClick={() => addCue.mutate({ position_ms: 0, type: 'hot', color: 0xCC0000, sort_order: (track.cues?.length || 0) })}
+              onClick={() => addCue.mutate({ position_ms: 0, type: 'hot', color: 0xCC0000, sort_order: track.cues?.length || 0 })}
             >
               <Plus size={14} />
             </button>
           </div>
-          {(track.cues || []).map((cue) => (
+          {(track.cues || []).map(cue => (
             <div key={cue.id} className="flex items-center gap-2 py-1 text-xs">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: hexColor(cue.color) }} />
               <span className="text-xkc-muted font-mono w-16">{formatDuration(cue.position_ms)}</span>
@@ -197,12 +274,77 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
 
         {/* Tags */}
         <div className="px-3 py-3">
-          <div className="text-xs text-xkc-muted uppercase tracking-wider mb-2">Tags</div>
-          {tagGroups.map((group) => (
+          <div className="text-xs text-xkc-muted uppercase tracking-wider mb-3">Tags</div>
+
+          {/* Genre pseudo-group */}
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-xkc-muted">Genre</span>
+              <button
+                onClick={() => { setAddingGenre(true); setGenreInput('') }}
+                className="text-xkc-muted hover:text-xkc-accent"
+                title="Add genre"
+              >
+                <Plus size={12} />
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {genreChips.map(g => (
+                <span
+                  key={g}
+                  className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-xkc-border text-xkc-muted group"
+                >
+                  {g}
+                  <button
+                    onClick={() => removeGenreChip(g)}
+                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity leading-none"
+                    title="Remove genre"
+                  >
+                    <X size={9} />
+                  </button>
+                </span>
+              ))}
+              {addingGenre && (
+                <input
+                  autoFocus
+                  value={genreInput}
+                  onChange={e => setGenreInput(e.target.value)}
+                  onBlur={() => { if (genreInput.trim()) addGenreChip(genreInput); else setAddingGenre(false) }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') addGenreChip(genreInput)
+                    if (e.key === 'Escape') { setAddingGenre(false); setGenreInput('') }
+                    e.stopPropagation()
+                  }}
+                  placeholder="Genre name"
+                  className="text-xs px-2 py-0.5 rounded-full border border-xkc-accent bg-xkc-bg text-xkc-text focus:outline-none w-24"
+                />
+              )}
+              {genreChips.length === 0 && !addingGenre && (
+                <button
+                  onClick={() => { setAddingGenre(true); setGenreInput('') }}
+                  className="text-[11px] text-xkc-border/50 hover:text-xkc-muted italic px-1"
+                >
+                  + add genre
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Real tag groups */}
+          {tagGroups.map(group => (
             <div key={group.id} className="mb-3">
-              <div className="text-xs text-xkc-muted mb-1">{group.name}</div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs text-xkc-muted">{group.name}</span>
+                <button
+                  onClick={() => { setAddingTagToGroup(group.id); setNewTagName('') }}
+                  className="text-xkc-muted hover:text-xkc-accent"
+                  title={`Add tag to ${group.name}`}
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
               <div className="flex flex-wrap gap-1">
-                {group.tags.map((tag) => (
+                {group.tags.map(tag => (
                   <button
                     key={tag.id}
                     onClick={() => toggleTag(tag.id)}
@@ -217,6 +359,26 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
                     {tag.name}
                   </button>
                 ))}
+                {addingTagToGroup === group.id && (
+                  <input
+                    autoFocus
+                    value={newTagName}
+                    onChange={e => setNewTagName(e.target.value)}
+                    onBlur={() => { if (!newTagName.trim()) setAddingTagToGroup(null) }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && newTagName.trim()) {
+                        createTag.mutate({ groupId: group.id, name: newTagName.trim() })
+                      }
+                      if (e.key === 'Escape') { setAddingTagToGroup(null); setNewTagName('') }
+                      e.stopPropagation()
+                    }}
+                    placeholder="Tag name"
+                    className="text-xs px-2 py-0.5 rounded-full border border-xkc-accent bg-xkc-bg text-xkc-text focus:outline-none w-20"
+                  />
+                )}
+                {group.tags.length === 0 && addingTagToGroup !== group.id && (
+                  <span className="text-[11px] text-xkc-border/50 italic">no tags yet</span>
+                )}
               </div>
             </div>
           ))}
