@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { useStore } from '../lib/store'
 import type { User } from '../lib/api'
-import { ArrowLeft, Plus, UserX } from 'lucide-react'
+import { ArrowLeft, Plus, Pencil, Trash2, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const PERMISSION_LABELS: Record<string, string> = {
@@ -21,6 +22,7 @@ const PERMISSION_LABELS: Record<string, string> = {
 export default function Users() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { user: me } = useStore()
   const [adding, setAdding] = useState(false)
   const [newUser, setNewUser] = useState({ username: '', password: '', email: '', is_admin: false })
 
@@ -28,38 +30,30 @@ export default function Users() {
 
   const createUser = useMutation({
     mutationFn: () => api.users.createUser(newUser),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setAdding(false); setNewUser({ username: '', password: '', email: '', is_admin: false }) },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      setAdding(false)
+      setNewUser({ username: '', password: '', email: '', is_admin: false })
+    },
   })
-
-  const updateUser = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<User> }) => api.users.updateUser(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
-  })
-
-  function togglePermission(user: User, perm: string, val: boolean) {
-    updateUser.mutate({ id: user.id, data: { permissions: { ...user.permissions, [perm]: val } } })
-  }
 
   return (
     <div className="min-h-screen bg-xkc-bg flex flex-col">
       <header className="flex items-center gap-3 px-4 py-3 border-b border-xkc-border bg-xkc-surface">
         <button onClick={() => navigate('/')} className="text-xkc-muted hover:text-xkc-text"><ArrowLeft size={18} /></button>
         <div className="font-medium text-xkc-text">User Management</div>
-        <div className="ml-auto">
-          <button
-            onClick={() => setAdding(true)}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-xkc-accent text-white hover:bg-blue-600"
-          >
-            <Plus size={12} /> New User
-          </button>
-        </div>
+        <button
+          onClick={() => setAdding(true)}
+          className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-xkc-accent text-white hover:bg-blue-600"
+        >
+          <Plus size={12} /> New User
+        </button>
       </header>
 
-      <div className="p-6 max-w-5xl">
-        {/* Create user form */}
+      <div className="p-6 max-w-3xl space-y-3">
         {adding && (
-          <div className="bg-xkc-surface border border-xkc-border rounded-xl p-4 mb-6 space-y-3">
-            <div className="text-sm font-medium text-xkc-text mb-2">Create User</div>
+          <div className="bg-xkc-surface border border-xkc-border rounded-xl p-4 space-y-3">
+            <div className="text-sm font-medium text-xkc-text">Create User</div>
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="label">Username</label>
@@ -85,60 +79,9 @@ export default function Users() {
           </div>
         )}
 
-        {/* Users table */}
-        <div className="space-y-3">
-          {(users as User[]).map((user) => (
-            <div key={user.id} className="bg-xkc-surface border border-xkc-border rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm text-xkc-text">{user.username}</span>
-                    {user.is_admin && (
-                      <span className="text-xs px-1.5 py-0.5 bg-xkc-accent/20 text-xkc-accent rounded">admin</span>
-                    )}
-                    {!user.is_active && (
-                      <span className="text-xs px-1.5 py-0.5 bg-red-900/30 text-red-400 rounded">inactive</span>
-                    )}
-                  </div>
-                  {user.email && <div className="text-xs text-xkc-muted mt-0.5">{user.email}</div>}
-                </div>
-                {!user.is_admin && (
-                  <button
-                    onClick={() => updateUser.mutate({ id: user.id, data: { is_active: !user.is_active } })}
-                    className="flex items-center gap-1 text-xs text-xkc-muted hover:text-red-400"
-                  >
-                    <UserX size={12} />
-                    {user.is_active ? 'Deactivate' : 'Activate'}
-                  </button>
-                )}
-              </div>
-
-              {!user.is_admin && (
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(PERMISSION_LABELS).map(([perm, label]) => (
-                    <label
-                      key={perm}
-                      className={cn(
-                        'flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border cursor-pointer transition-colors',
-                        user.permissions?.[perm]
-                          ? 'border-xkc-accent/50 bg-xkc-accent/10 text-xkc-accent'
-                          : 'border-xkc-border text-xkc-muted'
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!!user.permissions?.[perm]}
-                        onChange={(e) => togglePermission(user, perm, e.target.checked)}
-                        className="sr-only"
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        {(users as User[]).map((user) => (
+          <UserCard key={user.id} user={user} me={me} qc={qc} />
+        ))}
       </div>
 
       <style>{`
@@ -151,6 +94,186 @@ export default function Users() {
         .btn-secondary { background: #1a1a1a; color: #e5e5e5; border: 1px solid #2a2a2a; border-radius: 8px; padding: 6px 14px; }
         .btn-secondary:hover { background: #2a2a2a; }
       `}</style>
+    </div>
+  )
+}
+
+function UserCard({ user, me, qc }: { user: User; me: User | null; qc: ReturnType<typeof useQueryClient> }) {
+  const [editOpen, setEditOpen] = useState(false)
+  const [draft, setDraft] = useState({ username: user.username, email: user.email || '', password: '' })
+  const isSelf = me?.id === user.id
+
+  const updateUser = useMutation({
+    mutationFn: (data: Partial<User> & { password?: string }) => api.users.updateUser(user.id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  })
+
+  const saveEdit = useMutation({
+    mutationFn: () => {
+      const payload: Record<string, unknown> = {}
+      if (draft.username !== user.username) payload.username = draft.username
+      if (draft.email !== (user.email || '')) payload.email = draft.email
+      if (draft.password) payload.password = draft.password
+      return api.users.updateUser(user.id, payload)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] })
+      setEditOpen(false)
+      setDraft({ username: user.username, email: user.email || '', password: '' })
+    },
+  })
+
+  const deleteUser = useMutation({
+    mutationFn: () => api.users.deleteUser(user.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  })
+
+  function togglePermission(perm: string, val: boolean) {
+    updateUser.mutate({ permissions: { ...user.permissions, [perm]: val } })
+  }
+
+  return (
+    <div className={cn('bg-xkc-surface border border-xkc-border rounded-xl p-4', !user.is_active && 'opacity-50')}>
+      {/* Header row */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-8 h-8 rounded-full bg-xkc-accent/20 text-xkc-accent flex items-center justify-center text-sm font-medium flex-shrink-0">
+          {user.username[0].toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-sm text-xkc-text">{user.username}</span>
+            {user.is_admin && (
+              <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-xkc-accent/20 text-xkc-accent rounded">
+                <ShieldCheck size={10} /> Admin
+              </span>
+            )}
+            {!user.is_active && (
+              <span className="text-xs px-1.5 py-0.5 bg-red-900/30 text-red-400 rounded">Inactive</span>
+            )}
+            {isSelf && (
+              <span className="text-xs text-xkc-muted">(you)</span>
+            )}
+          </div>
+          {user.email && <div className="text-xs text-xkc-muted mt-0.5 truncate">{user.email}</div>}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => {
+              setDraft({ username: user.username, email: user.email || '', password: '' })
+              setEditOpen((v) => !v)
+            }}
+            className={cn('p-1.5 rounded-lg text-xkc-muted hover:text-xkc-text hover:bg-xkc-border/50 transition-colors', editOpen && 'bg-xkc-border/50 text-xkc-text')}
+            title="Edit user"
+          >
+            {editOpen ? <ChevronUp size={14} /> : <Pencil size={14} />}
+          </button>
+
+          {!isSelf && (
+            <button
+              onClick={() => {
+                if (confirm(`${user.is_active ? 'Deactivate' : 'Delete'} user "${user.username}"?`))
+                  deleteUser.mutate()
+              }}
+              className="p-1.5 rounded-lg text-xkc-muted hover:text-red-400 hover:bg-red-900/20 transition-colors"
+              title={user.is_active ? 'Deactivate user' : 'Delete user'}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Edit panel */}
+      {editOpen && (
+        <div className="mb-4 p-3 bg-xkc-bg rounded-lg border border-xkc-border space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Username</label>
+              <input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} className="input" />
+            </div>
+            <div>
+              <label className="label">Email</label>
+              <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="optional" className="input" />
+            </div>
+          </div>
+          <div>
+            <label className="label">New Password <span className="normal-case text-xkc-muted">(leave blank to keep current)</span></label>
+            <input type="password" value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} placeholder="Min 8 characters" className="input" />
+          </div>
+          {!user.is_admin && (
+            <label className="flex items-center gap-2 text-sm text-xkc-text">
+              <input
+                type="checkbox"
+                checked={false}
+                onChange={() => updateUser.mutate({ is_admin: true })}
+                className="accent-xkc-accent"
+              />
+              Promote to Admin
+            </label>
+          )}
+          {user.is_admin && !isSelf && (
+            <label className="flex items-center gap-2 text-sm text-xkc-text">
+              <input
+                type="checkbox"
+                checked={true}
+                onChange={() => updateUser.mutate({ is_admin: false })}
+                className="accent-xkc-accent"
+              />
+              Admin
+            </label>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => saveEdit.mutate()}
+              disabled={saveEdit.isPending || (!draft.password && draft.username === user.username && draft.email === (user.email || ''))}
+              className="btn-primary text-xs"
+            >
+              {saveEdit.isPending ? 'Saving…' : 'Save Changes'}
+            </button>
+            <button onClick={() => setEditOpen(false)} className="btn-secondary text-xs">Cancel</button>
+            {!isSelf && (
+              <button
+                onClick={() => updateUser.mutate({ is_active: !user.is_active })}
+                className="ml-auto text-xs text-xkc-muted hover:text-xkc-text"
+              >
+                {user.is_active ? 'Deactivate' : 'Reactivate'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Permissions (non-admins only) */}
+      {!user.is_admin ? (
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(PERMISSION_LABELS).map(([perm, label]) => (
+            <label
+              key={perm}
+              className={cn(
+                'flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border cursor-pointer transition-colors select-none',
+                user.permissions?.[perm]
+                  ? 'border-xkc-accent/50 bg-xkc-accent/10 text-xkc-accent'
+                  : 'border-xkc-border text-xkc-muted hover:border-xkc-border/80'
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={!!user.permissions?.[perm]}
+                onChange={(e) => togglePermission(perm, e.target.checked)}
+                className="sr-only"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-xkc-muted flex items-center gap-1.5">
+          <ShieldCheck size={11} className="text-xkc-accent" />
+          Has all permissions
+        </div>
+      )}
     </div>
   )
 }

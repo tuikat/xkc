@@ -128,6 +128,8 @@ def update_user(
         user.username = body.username
     if body.email is not None:
         user.email = body.email
+    if body.password is not None:
+        user.password_hash = hash_password(body.password)
     if body.is_active is not None:
         user.is_active = body.is_active
     if body.is_admin is not None:

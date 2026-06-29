@@ -232,6 +232,8 @@ export const api = {
       req<User>('/api/users/', { method: 'POST', body: JSON.stringify(data) }),
     updateUser: (id: string, data: Partial<User> & { password?: string }) =>
       req<User>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    deleteUser: (id: string) =>
+      req<void>(`/api/users/${id}`, { method: 'DELETE' }),
   },
 
   streamSources: {

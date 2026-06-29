@@ -31,6 +31,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=8)
     is_active: Optional[bool] = None
     is_admin: Optional[bool] = None
     permissions: Optional[Dict[str, bool]] = None
