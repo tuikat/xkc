@@ -50,14 +50,52 @@ export default function Settings() {
 }
 
 function GeneralTab() {
+  const qc = useQueryClient()
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get })
+  const [urlDraft, setUrlDraft] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  const currentUrl = String(settings?.public_url || '')
+  const displayUrl = urlDraft ?? currentUrl
+
+  const saveUrl = useMutation({
+    mutationFn: () => api.settings.update({ public_url: displayUrl }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      setUrlDraft(null)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-sm font-medium text-xkc-text mb-4">Server Information</h2>
-        <div className="bg-xkc-surface border border-xkc-border rounded-xl p-4 space-y-3 text-sm">
-          <Row label="Public URL" value={String(settings?.public_url || 'http://localhost:3001')} />
-          <Row label="Version" value="1.0.0" />
+        <h2 className="text-sm font-medium text-xkc-text mb-4">Server</h2>
+        <div className="bg-xkc-surface border border-xkc-border rounded-xl p-4 space-y-4 text-sm">
+          <div>
+            <label className="block text-xs text-xkc-muted uppercase tracking-wide mb-1.5">Public URL</label>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 bg-xkc-bg border border-xkc-border rounded-lg px-3 py-1.5 text-sm text-xkc-text font-mono focus:outline-none focus:border-xkc-accent"
+                value={displayUrl}
+                onChange={(e) => setUrlDraft(e.target.value)}
+                placeholder="https://xkc.io"
+              />
+              <button
+                onClick={() => saveUrl.mutate()}
+                disabled={saveUrl.isPending || displayUrl === currentUrl}
+                className="px-3 py-1.5 rounded-lg bg-xkc-accent text-white text-xs disabled:opacity-40 hover:bg-blue-600"
+              >
+                {saved ? 'Saved!' : saveUrl.isPending ? '…' : 'Save'}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-xkc-muted">Used in export configs and desktop app connections.</p>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-xkc-muted">Version</span>
+            <span className="text-xkc-text font-mono text-xs">1.0.0</span>
+          </div>
         </div>
       </div>
     </div>

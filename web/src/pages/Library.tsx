@@ -145,7 +145,7 @@ export default function Library() {
           />
 
           {/* User menu */}
-          <div className="relative">
+          <div className="relative ml-auto">
             <button
               onClick={() => setUserMenuOpen(!userMenuOpen)}
               className="flex items-center gap-1.5 text-xs text-xkc-muted hover:text-xkc-text"

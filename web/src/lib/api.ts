@@ -152,7 +152,7 @@ export const api = {
 
   tracks: {
     getTracks: (params: TrackParams = {}) =>
-      req<Track[]>(`/api/tracks${buildQuery(params as Record<string, unknown>)}`),
+      req<Track[]>(`/api/tracks/${buildQuery(params as Record<string, unknown>)}`),
     getTrack: (id: string) => req<Track>(`/api/tracks/${id}`),
     updateTrack: (id: string, data: Partial<Track>) =>
       req<Track>(`/api/tracks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -199,9 +199,9 @@ export const api = {
   },
 
   playlists: {
-    getPlaylists: () => req<Playlist[]>('/api/playlists'),
+    getPlaylists: () => req<Playlist[]>('/api/playlists/'),
     createPlaylist: (data: { name: string; parent_id?: string; cover_color?: number }) =>
-      req<Playlist>('/api/playlists', { method: 'POST', body: JSON.stringify(data) }),
+      req<Playlist>('/api/playlists/', { method: 'POST', body: JSON.stringify(data) }),
     updatePlaylist: (id: string, data: Partial<Playlist>) =>
       req<Playlist>(`/api/playlists/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deletePlaylist: (id: string) => req<void>(`/api/playlists/${id}`, { method: 'DELETE' }),
@@ -213,9 +213,9 @@ export const api = {
   },
 
   tags: {
-    getTagGroups: () => req<TagGroup[]>('/api/tags'),
+    getTagGroups: () => req<TagGroup[]>('/api/tags/'),
     createGroup: (data: { name: string }) =>
-      req<TagGroup>('/api/tags/groups', { method: 'POST', body: JSON.stringify(data) }),
+      req<TagGroup>('/api/tags/groups/', { method: 'POST', body: JSON.stringify(data) }),
     updateGroup: (id: string, data: { name: string }) =>
       req<TagGroup>(`/api/tags/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteGroup: (id: string) => req<void>(`/api/tags/groups/${id}`, { method: 'DELETE' }),
@@ -227,15 +227,15 @@ export const api = {
   },
 
   users: {
-    getUsers: () => req<User[]>('/api/users'),
+    getUsers: () => req<User[]>('/api/users/'),
     createUser: (data: { username: string; password: string; email?: string; is_admin?: boolean }) =>
-      req<User>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
+      req<User>('/api/users/', { method: 'POST', body: JSON.stringify(data) }),
     updateUser: (id: string, data: Partial<User> & { password?: string }) =>
       req<User>(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   },
 
   streamSources: {
-    getSources: () => req<StreamSource[]>('/api/stream-sources'),
+    getSources: () => req<StreamSource[]>('/api/stream-sources/'),
     createSource: (data: {
       service: string
       display_name: string
@@ -243,7 +243,7 @@ export const api = {
       source_url: string
       sync_mode?: string
       auto_sync?: boolean
-    }) => req<StreamSource>('/api/stream-sources', { method: 'POST', body: JSON.stringify(data) }),
+    }) => req<StreamSource>('/api/stream-sources/', { method: 'POST', body: JSON.stringify(data) }),
     updateSource: (id: string, data: Partial<StreamSource>) =>
       req<StreamSource>(`/api/stream-sources/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteSource: (id: string) => req<void>(`/api/stream-sources/${id}`, { method: 'DELETE' }),
@@ -262,10 +262,10 @@ export const api = {
   },
 
   settings: {
-    get: () => req<Record<string, unknown>>('/api/settings'),
+    get: () => req<Record<string, unknown>>('/api/settings/'),
     update: (data: Record<string, unknown>) =>
-      req<Record<string, unknown>>('/api/settings', { method: 'PATCH', body: JSON.stringify(data) }),
-    exportConfig: () => fetch('/api/settings/export', { credentials: 'include' }),
+      req<Record<string, unknown>>('/api/settings/', { method: 'PATCH', body: JSON.stringify(data) }),
+    exportConfig: () => fetch('/api/settings/export/', { credentials: 'include' }),
   },
 
   import: {

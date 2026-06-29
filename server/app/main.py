@@ -119,6 +119,9 @@ if static_dir.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
+        if full_path.startswith("api"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
         index = static_dir / "index.html"
         if index.exists():
             return FileResponse(str(index))
