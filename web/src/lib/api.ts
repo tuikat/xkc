@@ -97,6 +97,7 @@ export interface TrackParams {
   playlist_id?: string
   tag_ids?: string
   genre?: string
+  artist?: string
   min_bpm?: number
   max_bpm?: number
   key_camelot?: string

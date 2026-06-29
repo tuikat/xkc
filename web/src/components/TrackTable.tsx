@@ -18,15 +18,16 @@ interface TrackTableProps {
   onAddToPlaylist?: (trackId: string) => void
   onDeleteTrack?: (trackId: string) => void
   onReanalyze?: (trackId: string) => void
+  onFilterByArtist?: (artist: string) => void
 }
 
 // ---- Column definitions ----
 interface ColDef {
   id: string
   label: string
-  width: string   // CSS min-width for the column
+  width: string
   sortKey?: keyof Track
-  render: (track: Track, tagById: Record<string, Tag>, trackId: string) => React.ReactNode
+  render: (track: Track, tagById: Record<string, Tag>, trackId: string, onFilterByArtist?: (a: string) => void) => React.ReactNode
 }
 
 function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: boolean }) {
@@ -87,7 +88,13 @@ const ALL_COLS: ColDef[] = [
   { id: 'title', label: 'Title', width: '180px', sortKey: 'title',
     render: (t) => <span className="truncate text-xkc-text">{t.title || '—'}</span> },
   { id: 'artist', label: 'Artist', width: '140px', sortKey: 'artist',
-    render: (t) => <span className="truncate text-xkc-muted">{t.artist || '—'}</span> },
+    render: (t, _tb, _id, onFilterByArtist) => t.artist
+      ? <button
+          onClick={(e) => { e.stopPropagation(); onFilterByArtist?.(t.artist!) }}
+          className="truncate text-xkc-muted hover:text-xkc-accent hover:underline text-left max-w-full"
+          title={`Filter by ${t.artist}`}
+        >{t.artist}</button>
+      : <span className="text-xkc-muted">—</span> },
   { id: 'album', label: 'Album', width: '130px', sortKey: 'album',
     render: (t) => <span className="truncate text-xkc-muted">{t.album || '—'}</span> },
   { id: 'bpm', label: 'BPM', width: '58px', sortKey: 'bpm',
@@ -127,7 +134,7 @@ const DEFAULT_COL_IDS = ['wave', 'title', 'artist', 'bpm', 'key', 'duration', 'g
 
 export default function TrackTable({
   tracks, onSelectTrack, selectedTrackId, tagGroups = [],
-  onAddToPlaylist, onDeleteTrack, onReanalyze,
+  onAddToPlaylist, onDeleteTrack, onReanalyze, onFilterByArtist,
 }: TrackTableProps) {
   const qc = useQueryClient()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -216,10 +223,11 @@ export default function TrackTable({
 
   return (
     <div className="relative flex flex-col h-full" onClick={() => { setContextMenu(null); setColPickerOpen(false) }}>
-      {/* Header */}
-      <div className="overflow-x-auto flex-shrink-0">
+      {/* Single scroll container — header + rows scroll together horizontally */}
+      <div className="overflow-auto flex-1">
+        {/* Sticky header row */}
         <div
-          className="grid gap-x-2 px-3 py-2 border-b border-xkc-border text-xs text-xkc-muted uppercase tracking-wider bg-xkc-surface"
+          className="grid gap-x-2 px-3 py-2 border-b border-xkc-border text-xs text-xkc-muted uppercase tracking-wider bg-xkc-surface sticky top-0 z-10"
           style={{ gridTemplateColumns: gridTemplate, minWidth: 'max-content' }}
         >
           {/* Column picker button */}
@@ -249,37 +257,8 @@ export default function TrackTable({
             </button>
           ))}
         </div>
-      </div>
 
-      {/* Column picker dropdown */}
-      {colPickerOpen && (
-        <div
-          className="absolute top-9 left-3 z-50 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl p-3 min-w-[180px]"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="text-xs text-xkc-muted mb-2 font-medium uppercase tracking-wider">Columns</div>
-          {ALL_COLS.map((col) => (
-            <label key={col.id} className="flex items-center gap-2 py-1 text-xs text-xkc-text cursor-pointer hover:text-white">
-              <input
-                type="checkbox"
-                checked={visibleColIds.includes(col.id)}
-                onChange={() => toggleCol(col.id)}
-                className="accent-xkc-accent"
-              />
-              {col.label}
-            </label>
-          ))}
-          <button
-            onClick={() => setVisibleColIds(DEFAULT_COL_IDS)}
-            className="mt-2 text-xs text-xkc-muted hover:text-xkc-text w-full text-left"
-          >
-            Reset to default
-          </button>
-        </div>
-      )}
-
-      {/* Rows — horizontally scrollable */}
-      <div className="overflow-auto flex-1">
+        {/* Rows */}
         {sorted.length === 0 && (
           <div className="flex items-center justify-center h-32 text-xkc-muted text-sm">No tracks found</div>
         )}
@@ -327,13 +306,40 @@ export default function TrackTable({
                 <div key={col.id} className="min-w-0 overflow-hidden flex items-center">
                   {col.id === 'wave' && canPlay
                     ? <MiniWaveform trackId={track.id} isPlaying={isPlaying} />
-                    : col.render(track, tagById, track.id)}
+                    : col.render(track, tagById, track.id, onFilterByArtist)}
                 </div>
               ))}
             </div>
           )
         })}
       </div>
+
+      {/* Column picker dropdown */}
+      {colPickerOpen && (
+        <div
+          className="absolute top-9 left-3 z-50 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl p-3 min-w-[180px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-xs text-xkc-muted mb-2 font-medium uppercase tracking-wider">Columns</div>
+          {ALL_COLS.map((col) => (
+            <label key={col.id} className="flex items-center gap-2 py-1 text-xs text-xkc-text cursor-pointer hover:text-white">
+              <input
+                type="checkbox"
+                checked={visibleColIds.includes(col.id)}
+                onChange={() => toggleCol(col.id)}
+                className="accent-xkc-accent"
+              />
+              {col.label}
+            </label>
+          ))}
+          <button
+            onClick={() => setVisibleColIds(DEFAULT_COL_IDS)}
+            className="mt-2 text-xs text-xkc-muted hover:text-xkc-text w-full text-left"
+          >
+            Reset to default
+          </button>
+        </div>
+      )}
 
       {/* Selection count badge */}
       {selectedIds.length > 1 && (

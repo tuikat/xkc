@@ -22,6 +22,7 @@ interface Filters {
   maxBpm?: number
   keyCamelot?: string
   genre?: string
+  artist?: string
   tagIds?: string[]
 }
 

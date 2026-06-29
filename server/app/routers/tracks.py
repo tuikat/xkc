@@ -131,6 +131,7 @@ def search_tracks(
     playlist_id: Optional[str] = Query(None),
     tag_ids: Optional[str] = Query(None),
     genre: Optional[str] = Query(None),
+    artist: Optional[str] = Query(None),
     min_bpm: Optional[float] = Query(None),
     max_bpm: Optional[float] = Query(None),
     key_camelot: Optional[str] = Query(None),
@@ -165,6 +166,8 @@ def search_tracks(
                 )
     if genre:
         query = query.filter(models.Track.genre.ilike(f"%{genre}%"))
+    if artist:
+        query = query.filter(models.Track.artist.ilike(f"%{artist}%"))
     if min_bpm is not None:
         query = query.filter(models.Track.bpm >= min_bpm)
     if max_bpm is not None:

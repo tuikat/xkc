@@ -38,6 +38,7 @@ export default function Library() {
       max_bpm: filters.maxBpm,
       key_camelot: filters.keyCamelot,
       genre: filters.genre,
+      artist: filters.artist,
     }),
   })
 
@@ -242,8 +243,16 @@ export default function Library() {
               {/* Waveform player — top of center panel, Rekordbox-style */}
               <Player />
               {/* Track count */}
-              <div className="px-3 py-1.5 border-b border-xkc-border text-xs text-xkc-muted bg-xkc-surface/50 flex-shrink-0">
-                {isLoading ? 'Loading…' : `${tracks.length} tracks`}
+              <div className="px-3 py-1.5 border-b border-xkc-border text-xs text-xkc-muted bg-xkc-surface/50 flex-shrink-0 flex items-center gap-2">
+                <span>{isLoading ? 'Loading…' : `${tracks.length} tracks`}</span>
+                {filters.artist && (
+                  <button
+                    onClick={() => setFilters({ ...filters, artist: undefined })}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30"
+                  >
+                    {filters.artist} ×
+                  </button>
+                )}
               </div>
               <TrackTable
                 tracks={tracks}
@@ -256,6 +265,7 @@ export default function Library() {
                 }}
                 onDeleteTrack={(id) => deleteTrack.mutate(id)}
                 onReanalyze={(id) => reanalyze.mutate(id)}
+                onFilterByArtist={(a) => setFilters({ ...filters, artist: a })}
               />
             </div>
 
