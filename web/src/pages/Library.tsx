@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -43,6 +43,14 @@ export default function Library() {
 
   const { data: tagGroups = [] } = useQuery({ queryKey: ['tagGroups'], queryFn: api.tags.getTagGroups })
   const { data: playlists = [] } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists.getPlaylists })
+
+  // Poll while any track is still being analyzed so columns fill in without a manual refresh
+  const hasAnalyzing = tracks.some((t) => t.analysis_state === 'analyzing' || t.analysis_state === 'pending')
+  useEffect(() => {
+    if (!hasAnalyzing) return
+    const id = setInterval(() => qc.invalidateQueries({ queryKey: ['tracks'] }), 2500)
+    return () => clearInterval(id)
+  }, [hasAnalyzing, qc])
 
   const deleteTrack = useMutation({
     mutationFn: api.tracks.deleteTrack,

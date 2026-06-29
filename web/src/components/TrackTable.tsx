@@ -61,7 +61,8 @@ function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: bool
     }
   }, [data, isPlaying])
 
-  return <canvas ref={canvasRef} style={{ display: 'block' }} />
+  // width/height attrs set intrinsic size immediately so the row doesn't jump from 150px default
+  return <canvas ref={canvasRef} width={96} height={24} style={{ display: 'block', width: 96, height: 24 }} />
 }
 
 function Stars({ rating }: { rating: number }) {
