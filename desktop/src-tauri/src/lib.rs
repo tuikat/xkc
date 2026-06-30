@@ -184,7 +184,7 @@ async fn sync_usb(
     let body = json!({ "playlist_ids": playlist_ids, "format": "pioneer" });
     let res = client
         .post(format!("{}/api/export/", base))
-        .header("Cookie", format!("access_token={}", token))
+        .header("Authorization", format!("Bearer {}", token))
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -203,7 +203,7 @@ async fn sync_usb(
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         let status_res = client
             .get(format!("{}/api/export/{}", base, job_id))
-            .header("Cookie", format!("access_token={}", token))
+            .header("Authorization", format!("Bearer {}", token))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -218,7 +218,7 @@ async fn sync_usb(
     // 3. Download zip
     let zip_res = client
         .get(format!("{}/api/export/{}/download", base, job_id))
-        .header("Cookie", format!("access_token={}", token))
+        .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -315,7 +315,7 @@ async fn sync_playlist_to_folder(
 
     let tracks_res = client
         .get(format!("{}/api/tracks/?playlist_id={}", base, playlist_id))
-        .header("Cookie", format!("access_token={}", token))
+        .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -351,7 +351,7 @@ async fn sync_playlist_to_folder(
 
         let stream_res = client
             .get(format!("{}/api/tracks/{}/stream", base, id))
-            .header("Cookie", format!("access_token={}", token))
+            .header("Authorization", format!("Bearer {}", token))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -384,7 +384,7 @@ async fn upload_file(path: &Path, server_url: &str, token: &str) -> Result<(), S
     let client = reqwest::Client::new();
     let res = client
         .post(&url)
-        .header("Cookie", format!("access_token={}", token))
+        .header("Authorization", format!("Bearer {}", token))
         .multipart(form)
         .send()
         .await

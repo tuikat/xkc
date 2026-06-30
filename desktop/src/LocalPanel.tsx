@@ -117,7 +117,7 @@ export default function LocalPanel({ serverUrl }: Props) {
     if (activeSection !== 'usb' && !showAddDownload) return
     const token = localStorage.getItem('xkc_access_token') || ''
     fetch(`${serverUrl}/api/playlists/`, {
-      headers: { Cookie: `access_token=${token}` },
+      headers: { Authorization: `Bearer ${token}` },
       credentials: 'include',
     })
       .then(r => r.ok ? r.json() : [])

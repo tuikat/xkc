@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, Cookie, status
+from fastapi import Depends, HTTPException, Cookie, Header, status
 from sqlalchemy.orm import Session
 from typing import Optional
 from .database import get_db
@@ -8,11 +8,15 @@ from . import models
 
 def get_current_user(
     access_token: Optional[str] = Cookie(None),
+    authorization: Optional[str] = Header(None),
     db: Session = Depends(get_db),
 ) -> models.User:
-    if not access_token:
+    token = access_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    user = get_user_from_token(access_token, db)
+    user = get_user_from_token(token, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
     return user

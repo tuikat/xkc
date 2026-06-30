@@ -163,6 +163,9 @@ async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
+  // Desktop app: use Bearer token stored in sessionStorage to bypass WKWebView cookie ITP
+  const desktopToken = sessionStorage.getItem('xkc_desktop_token')
+  if (desktopToken) headers['Authorization'] = `Bearer ${desktopToken}`
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'include',
     headers: { ...headers, ...(options.headers as Record<string, string> | undefined) },

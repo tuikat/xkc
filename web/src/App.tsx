@@ -20,17 +20,21 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
     const dt = params.get('desktop_token')
     if (!dt) { setDesktopReady(true); return }
 
+    // Store in sessionStorage so api.ts sends it as Bearer on every request.
+    // This sidesteps WKWebView ITP which blocks SameSite=Lax cookies in iframes
+    // when the top-level page is tauri://localhost.
+    sessionStorage.setItem('xkc_desktop_token', dt)
+
+    // Also attempt cookie-based init as belt-and-suspenders for web browsers
     fetch(`/api/auth/desktop-init?token=${encodeURIComponent(dt)}`, {
       credentials: 'include',
+    }).catch(() => {}).finally(() => {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('desktop_token')
+      window.history.replaceState({}, '', url.pathname + (url.search || ''))
+      qc.invalidateQueries({ queryKey: ['me'] })
+      setDesktopReady(true)
     })
-      .catch(() => {})
-      .finally(() => {
-        const url = new URL(window.location.href)
-        url.searchParams.delete('desktop_token')
-        window.history.replaceState({}, '', url.pathname + (url.search || ''))
-        qc.invalidateQueries({ queryKey: ['me'] })
-        setDesktopReady(true)
-      })
   }, [qc])
 
   const { data: user, isLoading, isError } = useQuery({
