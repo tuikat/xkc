@@ -207,6 +207,22 @@ export const api = {
   tracks: {
     getTracks: (params: TrackParams = {}) =>
       req<Track[]>(`/api/tracks/${buildQuery(params as Record<string, unknown>)}`),
+    // The server caps a single request at 500 rows. The library view wants the
+    // whole matching set (so the track count is accurate and sorting/scrolling
+    // works across the full result, not just the first page), so page through
+    // it transparently here.
+    getAllTracks: async (params: TrackParams = {}): Promise<Track[]> => {
+      const pageSize = 500
+      let offset = 0
+      let all: Track[] = []
+      for (;;) {
+        const page = await req<Track[]>(`/api/tracks/${buildQuery({ ...params, limit: pageSize, offset } as Record<string, unknown>)}`)
+        all = all.concat(page)
+        if (page.length < pageSize) break
+        offset += pageSize
+      }
+      return all
+    },
     getTrack: (id: string) => req<Track>(`/api/tracks/${id}`),
     updateTrack: (id: string, data: Partial<Track>) =>
       req<Track>(`/api/tracks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

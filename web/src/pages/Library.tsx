@@ -60,7 +60,7 @@ export default function Library() {
 
   const { data: tracks = [], isLoading } = useQuery({
     queryKey: ['tracks', searchQuery, selectedPlaylistId, selectedTagIds, filters],
-    queryFn: () => api.tracks.getTracks({
+    queryFn: () => api.tracks.getAllTracks({
       q: searchQuery || undefined,
       playlist_id: selectedPlaylistId || undefined,
       tag_ids: selectedTagIds.length ? selectedTagIds.join(',') : undefined,
