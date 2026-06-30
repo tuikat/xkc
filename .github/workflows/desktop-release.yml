@@ -15,12 +15,16 @@ jobs:
         include:
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
+            label: 'macOS Apple Silicon'
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
+            label: 'macOS Intel'
           - platform: ubuntu-22.04
             args: ''
+            label: 'Linux x64'
           - platform: windows-latest
             args: ''
+            label: 'Windows x64'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -69,13 +73,18 @@ jobs:
             ## XKC ${{ github.ref_name }}
 
             ### Desktop App Downloads
-            | Platform | File |
-            |----------|------|
-            | Windows | `XKC_${{ github.ref_name }}_x64-setup.exe` |
-            | macOS (Apple Silicon) | `XKC_${{ github.ref_name }}_aarch64.dmg` |
-            | macOS (Intel) | `XKC_${{ github.ref_name }}_x64.dmg` |
-            | Linux | `XKC_${{ github.ref_name }}_amd64.AppImage` |
 
+            **macOS**
+            - Apple Silicon (M1/M2/M3/M4): `XKC_${{ github.ref_name }}_aarch64.dmg`
+            - Intel: `XKC_${{ github.ref_name }}_x64.dmg`
+
+            **Windows**
+            - Windows 10/11 x64: `XKC_${{ github.ref_name }}_x64-setup.exe`
+
+            **Linux**
+            - AppImage (x64): `XKC_${{ github.ref_name }}_amd64.AppImage`
+
+            ---
             The desktop app connects to your self-hosted XKC server.
             Enter your server URL on first launch (e.g. `http://your-server:3002`).
 
