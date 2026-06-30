@@ -134,7 +134,7 @@ def get_genres(
     rows = db.query(models.Track.genre).filter(models.Track.genre.isnot(None)).all()
     seen: set[str] = set()
     for (genre_str,) in rows:
-        for g in genre_str.split(','):
+        for g in genre_str.replace(';', ',').split(','):
             g = g.strip()
             if g:
                 seen.add(g)

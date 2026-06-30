@@ -41,11 +41,20 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
     queryFn: () => api.tracks.getTrack(trackId),
   })
 
-  const { data: allGenres = [] } = useQuery({
+  const { data: trackGenres = [] } = useQuery({
     queryKey: ['genres'],
     queryFn: api.tracks.getGenres,
     staleTime: 60_000,
   })
+
+  // Merge genres from the Genre tag group with genres typed on tracks
+  const allGenres = useMemo(() => {
+    const tagGenres = tagGroups
+      .find(g => g.name.toLowerCase() === 'genre')
+      ?.tags.map(t => t.name) ?? []
+    const merged = new Set([...tagGenres, ...trackGenres])
+    return [...merged].sort((a, b) => a.localeCompare(b))
+  }, [tagGroups, trackGenres])
 
   const [editData, setEditData] = useState<Partial<Track>>({})
   const [isDirty, setIsDirty] = useState(false)
@@ -283,66 +292,84 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
           <div className="text-xs text-xkc-muted uppercase tracking-wider mb-3">Tags</div>
 
           {/* Genre pseudo-group */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs text-xkc-muted">Genre</span>
-              <button
-                onClick={() => { setAddingGenre(true); setGenreInput('') }}
-                className="text-xkc-muted hover:text-xkc-accent"
-                title="Add genre"
-              >
-                <Plus size={12} />
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {genreChips.map(g => (
-                <span
-                  key={g}
-                  className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-xkc-border text-xkc-muted group"
-                >
-                  {g}
+          {(() => {
+            const genreTagOptions = (tagGroups.find(g => g.name.toLowerCase() === 'genre')?.tags ?? [])
+            return (
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-xkc-muted">Genre</span>
                   <button
-                    onClick={() => removeGenreChip(g)}
-                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity leading-none"
-                    title="Remove genre"
+                    onClick={() => { setAddingGenre(true); setGenreInput('') }}
+                    className="text-xkc-muted hover:text-xkc-accent"
+                    title="Custom genre"
                   >
-                    <X size={9} />
+                    <Plus size={12} />
                   </button>
-                </span>
-              ))}
-              {addingGenre && (
-                <>
-                  <datalist id="genre-suggestions">
-                    {allGenres.filter(g => !genreChips.some(c => c.toLowerCase() === g.toLowerCase())).map(g => (
-                      <option key={g} value={g} />
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {/* Quick-pick pills from Genre tag group */}
+                  {genreTagOptions.map(t => {
+                    const active = genreChips.some(c => c.toLowerCase() === t.name.toLowerCase())
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => active ? removeGenreChip(t.name) : addGenreChip(t.name)}
+                        className={cn(
+                          'text-xs px-2 py-0.5 rounded-full border transition-colors',
+                          active
+                            ? 'border-xkc-accent text-xkc-accent bg-xkc-accent/10'
+                            : 'border-xkc-border text-xkc-muted hover:border-xkc-accent hover:text-xkc-accent'
+                        )}
+                      >
+                        {t.name}
+                      </button>
+                    )
+                  })}
+                  {/* Any manually typed genres not in the tag group */}
+                  {genreChips
+                    .filter(g => !genreTagOptions.some(t => t.name.toLowerCase() === g.toLowerCase()))
+                    .map(g => (
+                      <span
+                        key={g}
+                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-xkc-accent text-xkc-accent bg-xkc-accent/10 group"
+                      >
+                        {g}
+                        <button
+                          onClick={() => removeGenreChip(g)}
+                          className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity leading-none"
+                          title="Remove genre"
+                        >
+                          <X size={9} />
+                        </button>
+                      </span>
                     ))}
-                  </datalist>
-                  <input
-                    autoFocus
-                    list="genre-suggestions"
-                    value={genreInput}
-                    onChange={e => setGenreInput(e.target.value)}
-                    onBlur={() => { if (genreInput.trim()) addGenreChip(genreInput); else setAddingGenre(false) }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') addGenreChip(genreInput)
-                      if (e.key === 'Escape') { setAddingGenre(false); setGenreInput('') }
-                      e.stopPropagation()
-                    }}
-                    placeholder="Genre name"
-                    className="text-xs px-2 py-0.5 rounded-full border border-xkc-accent bg-xkc-bg text-xkc-text focus:outline-none w-24"
-                  />
-                </>
-              )}
-              {genreChips.length === 0 && !addingGenre && (
-                <button
-                  onClick={() => { setAddingGenre(true); setGenreInput('') }}
-                  className="text-[11px] text-xkc-border/50 hover:text-xkc-muted italic px-1"
-                >
-                  + add genre
-                </button>
-              )}
-            </div>
-          </div>
+                  {addingGenre && (
+                    <>
+                      <datalist id="genre-suggestions">
+                        {allGenres.filter(g => !genreChips.some(c => c.toLowerCase() === g.toLowerCase())).map(g => (
+                          <option key={g} value={g} />
+                        ))}
+                      </datalist>
+                      <input
+                        autoFocus
+                        list="genre-suggestions"
+                        value={genreInput}
+                        onChange={e => setGenreInput(e.target.value)}
+                        onBlur={() => { if (genreInput.trim()) addGenreChip(genreInput); else setAddingGenre(false) }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') addGenreChip(genreInput)
+                          if (e.key === 'Escape') { setAddingGenre(false); setGenreInput('') }
+                          e.stopPropagation()
+                        }}
+                        placeholder="Custom genre…"
+                        className="text-xs px-2 py-0.5 rounded-full border border-xkc-accent bg-xkc-bg text-xkc-text focus:outline-none w-28"
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Real tag groups — skip any named "genre" since we handle it above */}
           {tagGroups.filter(g => g.name.toLowerCase() !== 'genre').map(group => (
