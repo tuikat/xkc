@@ -4,47 +4,9 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g. v1.0.0)'
-        required: false
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      release_id: ${{ steps.create-release.outputs.id }}
-      upload_url: ${{ steps.create-release.outputs.upload_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create Release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: XKC ${{ github.ref_name }}
-          body: |
-            ## XKC ${{ github.ref_name }}
-
-            ### Downloads
-            - **macOS** — XKC_${{ github.ref_name }}_aarch64.dmg (Apple Silicon)
-            - **macOS** — XKC_${{ github.ref_name }}_x64.dmg (Intel)
-            - **Windows** — XKC_${{ github.ref_name }}_x64-setup.exe
-            - **Linux** — XKC_${{ github.ref_name }}_amd64.AppImage
-
-            ### Server
-            Docker image: `ghcr.io/${{ github.repository_owner }}/xkc-server:${{ github.ref_name }}`
-
-            See [README](https://github.com/${{ github.repository }}) for setup instructions.
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-
   build-tauri:
-    needs: create-release
     permissions:
       contents: write
     strategy:
@@ -53,16 +15,12 @@ jobs:
         include:
           - platform: macos-latest
             args: '--target aarch64-apple-darwin'
-            arch: aarch64
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
-            arch: x64
           - platform: ubuntu-22.04
             args: ''
-            arch: amd64
           - platform: windows-latest
             args: ''
-            arch: x64
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -75,7 +33,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: desktop/package-lock.json
 
-      - name: Install Rust
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -99,19 +57,32 @@ jobs:
         working-directory: desktop
         run: npm ci
 
-      - name: Build Tauri app
+      - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: desktop
-          releaseId: ${{ needs.create-release.outputs.release_id }}
+          tagName: ${{ github.ref_name }}
+          releaseName: XKC ${{ github.ref_name }}
+          releaseBody: |
+            ## XKC ${{ github.ref_name }}
+
+            ### Desktop App Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows | `XKC_${{ github.ref_name }}_x64-setup.exe` |
+            | macOS (Apple Silicon) | `XKC_${{ github.ref_name }}_aarch64.dmg` |
+            | macOS (Intel) | `XKC_${{ github.ref_name }}_x64.dmg` |
+            | Linux | `XKC_${{ github.ref_name }}_amd64.AppImage` |
+
+            The desktop app connects to your self-hosted XKC server.
+            Enter your server URL on first launch (e.g. `http://your-server:3002`).
+
+            ### Server
+            Docker: `docker pull ghcr.io/tuikat/xkc-server:${{ github.ref_name }}`
+
+            See the [README](https://github.com/tuikat/xkc) for server setup.
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
