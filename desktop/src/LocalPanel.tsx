@@ -121,7 +121,7 @@ export default function LocalPanel({ serverUrl }: Props) {
     addLog(result ? 'usb_sync' : 'error', result ? `USB sync complete: ${device.name}` : `USB sync failed: ${device.name}`)
   }
 
-  const s: Record<string, React.CSSProperties> = {
+  const s: Record<string, any> = {
     root: { height: '100%', display: 'flex', flexDirection: 'column', background: '#111', overflow: 'hidden' },
     tabs: { display: 'flex', borderBottom: '1px solid #1f1f1f', flexShrink: 0 },
     tab: (active: boolean): React.CSSProperties => ({
