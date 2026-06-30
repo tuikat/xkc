@@ -105,7 +105,7 @@ app.add_middleware(
 )
 
 # API routers — each router defines its own path prefix, we just add /api
-from .routers import auth, users, tracks, playlists, tags, export, stream_sync, imports, settings as settings_router, sync
+from .routers import auth, users, tracks, playlists, tags, export, stream_sync, imports, settings as settings_router, sync, social
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
@@ -117,6 +117,7 @@ app.include_router(stream_sync.router, prefix="/api")
 app.include_router(imports.router, prefix="/api")
 app.include_router(settings_router.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
+app.include_router(social.router, prefix="/api")
 
 
 @app.get("/api/health")

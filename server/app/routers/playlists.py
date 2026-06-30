@@ -38,9 +38,18 @@ def list_playlists(
     if current_user.is_admin:
         playlists = db.query(models.Playlist).all()
     else:
+        # Own playlists + collaborative shared playlists + accepted invites
+        accepted_playlist_ids = [
+            inv.playlist_id for inv in
+            db.query(models.PlaylistShareInvite).filter(
+                models.PlaylistShareInvite.to_user_id == current_user.id,
+                models.PlaylistShareInvite.status == "accepted",
+            ).all()
+        ]
         playlists = db.query(models.Playlist).filter(
             (models.Playlist.owner_id == current_user.id) |
-            (models.Playlist.is_shared == True)
+            (models.Playlist.is_shared == True) |
+            (models.Playlist.id.in_(accepted_playlist_ids))
         ).all()
 
     result = []

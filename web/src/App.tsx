@@ -7,6 +7,7 @@ import Login from './pages/Login'
 import Library from './pages/Library'
 import Settings from './pages/Settings'
 import Users from './pages/Users'
+import Profile from './pages/Profile'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading, isError } = useQuery({
@@ -44,6 +45,7 @@ export default function App() {
                 <Route path="/" element={<Library />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/users" element={<Users />} />
+                <Route path="/profile/:username" element={<Profile />} />
               </Routes>
             </RequireAuth>
           }

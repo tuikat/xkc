@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { Playlist, TagGroup, StreamSource, SyncLog } from '../lib/api'
-import { Plus, ChevronDown, ChevronRight, Music, RefreshCw, Radio, X } from 'lucide-react'
+import { Plus, ChevronDown, ChevronRight, Music, RefreshCw, Radio, X, Globe, Lock, UserCircle } from 'lucide-react'
 import { cn, hexColor } from '../lib/utils'
 import { useStore } from '../lib/store'
+import SharePlaylistModal from './SharePlaylistModal'
 
 interface SidebarProps {
   selectedPlaylistId: string | null
@@ -18,7 +20,8 @@ const BLANK_SOURCE: NewSource = { display_name: '', service: 'soundcloud', sourc
 
 export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selectedTagIds, onTagSelect }: SidebarProps) {
   const qc = useQueryClient()
-  const { addLog, updateLog } = useStore()
+  const navigate = useNavigate()
+  const { addLog, updateLog, user } = useStore()
   const [newPlaylistName, setNewPlaylistName] = useState('')
   const [addingPlaylist, setAddingPlaylist] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(true)
@@ -32,6 +35,9 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
   const [plCtxMenu, setPlCtxMenu] = useState<{ x: number; y: number; pl: Playlist } | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameVal, setRenameVal] = useState('')
+  const [shareModalPlaylist, setShareModalPlaylist] = useState<Playlist | null>(null)
+
+  const { data: socialUsers = [] } = useQuery({ queryKey: ['social', 'users'], queryFn: api.social.getUsers })
 
   const { data: playlists = [] } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists.getPlaylists })
   const { data: tagGroups = [] } = useQuery({ queryKey: ['tagGroups'], queryFn: api.tags.getTagGroups })
@@ -56,6 +62,12 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
   const sharePlaylist = useMutation({
     mutationFn: ({ id, shared }: { id: string; shared: boolean }) =>
       api.playlists.updatePlaylist(id, { is_shared: shared } as Partial<Playlist>),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['playlists'] }); setPlCtxMenu(null) },
+  })
+
+  const setVisibility = useMutation({
+    mutationFn: ({ id, vis }: { id: string; vis: 'private' | 'public' }) =>
+      api.social.setVisibility(id, vis),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['playlists'] }); setPlCtxMenu(null) },
   })
   const deletePlaylist = useMutation({
@@ -282,10 +294,25 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
               onClick={() => { setRenamingId(plCtxMenu.pl.id); setRenameVal(plCtxMenu.pl.name); setPlCtxMenu(null) }}>
               Rename
             </button>
-            <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
-              onClick={() => sharePlaylist.mutate({ id: plCtxMenu.pl.id, shared: !plCtxMenu.pl.is_shared })}>
-              {plCtxMenu.pl.is_shared ? 'Stop sharing' : 'Share (collaborative)'}
-            </button>
+            {plCtxMenu.pl.owner_id === user?.id && <>
+              <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
+                onClick={() => sharePlaylist.mutate({ id: plCtxMenu.pl.id, shared: !plCtxMenu.pl.is_shared })}>
+                {plCtxMenu.pl.is_shared ? 'Stop collaborative sharing' : 'Share (collaborative)'}
+              </button>
+              <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text flex items-center gap-2"
+                onClick={() => { setShareModalPlaylist(plCtxMenu.pl); setPlCtxMenu(null) }}>
+                Share with user…
+              </button>
+              <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text flex items-center gap-2"
+                onClick={() => setVisibility.mutate({
+                  id: plCtxMenu.pl.id,
+                  vis: plCtxMenu.pl.visibility === 'public' ? 'private' : 'public',
+                })}>
+                {plCtxMenu.pl.visibility === 'public'
+                  ? <><Lock size={12} /> Make private</>
+                  : <><Globe size={12} /> Make public</>}
+              </button>
+            </>}
             <div className="border-t border-xkc-border my-1" />
             <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-red-400"
               onClick={() => deletePlaylist.mutate(plCtxMenu.pl.id)}>
@@ -513,6 +540,41 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
           <div className="text-xs text-xkc-muted px-1">No sources yet. Click + to add.</div>
         )}
       </div>
+
+      {/* People */}
+      {socialUsers.length > 0 && (
+        <div className="p-3 border-b border-xkc-border">
+          <div className="text-xs text-xkc-muted uppercase tracking-wider mb-2 px-1">People</div>
+          {socialUsers.map(u => (
+            <button
+              key={u.id}
+              onClick={() => navigate(`/profile/${u.username}`)}
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-xs text-xkc-muted hover:text-xkc-text hover:bg-xkc-border/50 transition-colors">
+              <div
+                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                style={{ backgroundColor: hexColor(u.avatar_color) }}>
+                {u.username[0].toUpperCase()}
+              </div>
+              <span className="truncate">{u.username}</span>
+            </button>
+          ))}
+          <button
+            onClick={() => navigate(`/profile/${user?.username}`)}
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-lg text-xs text-xkc-muted hover:text-xkc-text hover:bg-xkc-border/50 transition-colors mt-1">
+            <UserCircle size={14} />
+            My profile
+          </button>
+        </div>
+      )}
+
+      {/* Share modal */}
+      {shareModalPlaylist && (
+        <SharePlaylistModal
+          playlistId={shareModalPlaylist.id}
+          playlistName={shareModalPlaylist.name}
+          onClose={() => setShareModalPlaylist(null)}
+        />
+      )}
     </aside>
   )
 }

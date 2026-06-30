@@ -28,6 +28,8 @@ class User(Base):
     })
     created_at = Column(DateTime, server_default=func.now())
     last_login = Column(DateTime, nullable=True)
+    bio = Column(Text, nullable=True)
+    avatar_color = Column(Integer, default=0x4A90D9)
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     tracks = relationship("Track", back_populates="uploaded_by_user")
     playlists = relationship("Playlist", back_populates="owner")
@@ -180,6 +182,7 @@ class Playlist(Base):
     smart_rules = Column(JSON, nullable=True)
     is_shared = Column(Boolean, default=False)
     share_permission = Column(String(16), default="view")  # view/edit
+    visibility = Column(String(16), default="private")  # private/public
     sort_order = Column(Integer, default=0)
     cover_color = Column(Integer, default=0x4A90D9)
     created_at = Column(DateTime, server_default=func.now())
@@ -202,6 +205,26 @@ class PlaylistTrack(Base):
     playlist = relationship("Playlist", back_populates="tracks")
     track = relationship("Track", back_populates="playlist_entries")
     added_by_user = relationship("User", foreign_keys=[added_by])
+
+
+class PlaylistShareInvite(Base):
+    """Targeted share invite: one user shares a playlist with another, who must accept."""
+    __tablename__ = "playlist_share_invites"
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    playlist_id = Column(String(36), ForeignKey("playlists.id", ondelete="CASCADE"), nullable=False)
+    from_user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    to_user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(16), default="pending")  # pending/accepted/denied
+    message = Column(String(256), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    playlist = relationship("Playlist")
+    from_user = relationship("User", foreign_keys=[from_user_id])
+    to_user = relationship("User", foreign_keys=[to_user_id])
+
+    __table_args__ = (
+        UniqueConstraint("playlist_id", "to_user_id", name="uq_invite_playlist_user"),
+    )
 
 
 class StreamSource(Base):

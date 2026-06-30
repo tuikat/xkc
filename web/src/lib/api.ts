@@ -74,10 +74,43 @@ export interface Playlist {
   is_smart: boolean
   smart_rules: unknown
   is_shared: boolean
+  visibility: 'private' | 'public'
   sort_order: number
   cover_color: number
   created_at: string
   track_count: number
+  owner_username?: string | null
+  owner_avatar_color?: number | null
+}
+
+export interface UserProfile {
+  id: string
+  username: string
+  avatar_color: number
+  bio: string | null
+  created_at: string
+  playlists: Playlist[]
+}
+
+export interface ShareInvite {
+  id: string
+  playlist_id: string
+  playlist_name: string | null
+  from_user_id: string
+  from_username: string | null
+  from_avatar_color: number | null
+  to_user_id: string
+  to_username: string | null
+  status: 'pending' | 'accepted' | 'denied'
+  message: string | null
+  created_at: string
+}
+
+export interface SocialUser {
+  id: string
+  username: string
+  avatar_color: number
+  bio: string | null
 }
 
 export interface StreamSource {
@@ -315,5 +348,26 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+  },
+
+  social: {
+    getUsers: () => req<SocialUser[]>('/api/social/users'),
+    getProfile: (username: string) => req<UserProfile>(`/api/social/users/${username}`),
+    updateProfile: (data: { bio?: string; avatar_color?: number }) =>
+      req<{ bio: string | null; avatar_color: number }>('/api/social/users/me/profile', {
+        method: 'PATCH', body: JSON.stringify(data),
+      }),
+    setVisibility: (playlistId: string, visibility: 'private' | 'public') =>
+      req<{ visibility: string }>(`/api/social/playlists/${playlistId}/visibility`, {
+        method: 'PATCH', body: JSON.stringify({ visibility }),
+      }),
+    getInvites: () => req<ShareInvite[]>('/api/social/invites'),
+    getSentInvites: () => req<ShareInvite[]>('/api/social/invites/sent'),
+    sendInvite: (data: { playlist_id: string; to_user_id: string; message?: string }) =>
+      req<ShareInvite>('/api/social/invites', { method: 'POST', body: JSON.stringify(data) }),
+    respondToInvite: (id: string, status: 'accepted' | 'denied') =>
+      req<ShareInvite>(`/api/social/invites/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+    searchPublicPlaylists: (q: string) =>
+      req<Playlist[]>(`/api/social/search?q=${encodeURIComponent(q)}`),
   },
 }
