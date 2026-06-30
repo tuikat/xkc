@@ -1,20 +1,111 @@
-# XKC
+<div align="center">
 
-DJ library management system. Self-hosted, Pioneer CDJ-compatible, Spotify/SoundCloud sync.
+<h1>XKC</h1>
 
-## What it is
+<p><strong>Self-hosted DJ library management — built for professionals, runs on your hardware.</strong></p>
 
-- **Server** — Docker container with a web UI. Upload, tag, and organise your tracks. Sync from Spotify/SoundCloud playlists. Export USB-ready Pioneer format (export.pdb + ANLZ) compatible with CDJ-2000NXS, CDJ-3000, XDJ-RX3, XDJ-XZ.
-- **Desktop App** — macOS/Windows/Linux app. Watches folders, auto-syncs USB drives when inserted, shows the full web UI.
+<p>
+  <img src="https://img.shields.io/badge/status-early%20access-orange?style=flat-square" alt="Status" />
+  <img src="https://img.shields.io/github/v/release/tuikat/xkc?style=flat-square&label=latest" alt="Latest Release" />
+  <img src="https://img.shields.io/badge/pioneer-CDJ%20%7C%20XDJ%20compatible-blue?style=flat-square" alt="Pioneer Compatible" />
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platforms" />
+  <img src="https://img.shields.io/github/actions/workflow/status/tuikat/xkc/release.yml?style=flat-square&label=build" alt="Build" />
+</p>
 
-## Quick Start (Server)
+<p>
+  <a href="https://xkc.io">xkc.io</a> ·
+  <a href="../../releases/latest">Download</a> ·
+  <a href="#-quick-start">Quick Start</a> ·
+  <a href="#-roadmap">Roadmap</a>
+</p>
+
+---
+
+> **⚠️ Early Access — Active Development**
+>
+> XKC is functional and used in real workflows, but features, APIs, and data formats are still evolving. Breaking changes may occur between versions. Back up your library before upgrading.
+
+</div>
+
+---
+
+## What is XKC?
+
+XKC is a self-hosted DJ library manager. You run it on your own server — your music, your metadata, your data. No cloud lock-in. No subscription. No sending your library to someone else's servers.
+
+- **Web UI** — manage your full library from any browser on your network
+- **Desktop App** — native app for macOS, Windows, and Linux with USB auto-sync and folder watching
+- **Pioneer-ready exports** — full USB packages with rekordbox.xml, beat grids, cue points, and waveforms for all CDJ/XDJ hardware
+
+---
+
+## Features
+
+### Library Management
+- Upload tracks (MP3, FLAC, WAV, AIFF, M4A) with auto-extracted metadata
+- Edit title, artist, album, BPM, key, genre, label, rating, year
+- Custom tag groups and flexible tagging system
+- Playlists with drag-and-drop ordering
+- Full-text search across all fields
+- Multi-user with granular per-user permission controls
+
+### Pioneer USB Export
+
+Full USB packages compatible with all current CDJ/XDJ hardware:
+
+| Hardware | Status |
+|---|---|
+| CDJ-2000NXS / NXS2 | ✅ Supported |
+| CDJ-3000 | ✅ Supported |
+| XDJ-RX3 / XDJ-XZ | ✅ Supported |
+| OPUS-QUAD / XDJ-AZ / CDJ-3000X | ⏳ Coming — Device Library Plus format |
+
+Exports include rekordbox.xml with full metadata, ANLZ files (beat grids, cue points, hot cues, waveforms), audio files in Pioneer's `/Contents/` structure, and preserved hot cue colours and loop markers.
+
+### Streaming Sync
+Pull tracks from Spotify and SoundCloud playlists directly into your library. Mirror a playlist or import to master library. Manual or scheduled auto-sync. Tracks are matched and de-duplicated against your existing library.
+
+### Rekordbox Import
+Import your existing collection from Rekordbox XML — tracks, cue points, beat grids, playlists — without starting from scratch.
+
+### Desktop App
+Connects to your XKC server (local or remote). Full web UI embedded in the app. USB drive detection with per-device playlist selection, one-click sync, eject, and format. Folder sync keeps a local folder updated with a playlist. Available on macOS, Windows, and Linux.
+
+---
+
+## 🚧 Roadmap
+
+XKC is actively being built. Here's what's in progress and what's planned:
+
+| Feature | Status |
+|---|---|
+| **Device Library Plus** — OPUS-QUAD, XDJ-AZ, CDJ-3000X support | 🔨 In progress |
+| **Full colour waveforms** — like Engine DJ / Rekordbox | 🔨 In progress |
+| **On-device BPM analysis** — auto beat detection for unanalysed tracks | 📋 Planned |
+| **Key detection** — automatic musical key analysis on import | 📋 Planned |
+| **Auto hot cue suggestions** — energy-based cue placement | 📋 Planned |
+| **Serato library import** — crates, cues, and loops from Serato | 📋 Planned |
+| **Engine DJ import** — import from Denon/Engine DJ format | 📋 Planned |
+| **Mobile companion app** — iOS/Android library browser | 📋 Planned |
+| **Collaborative libraries** — shared libraries across users | 📋 Planned |
+| **Play history & analytics** — track stats, set analysis | 📋 Planned |
+| **Cloud backup** — optional encrypted offsite backup | 📋 Planned |
+| **More streaming sources** — YouTube Music, Beatport, Bandcamp | 📋 Planned |
+
+Have a suggestion? [Open an issue](../../issues).
+
+---
+
+## Quick Start
+
+### Server
 
 **1. Generate a secret key:**
 ```bash
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-**2. Create a `.env` file:**
+**2. Configure:**
 ```bash
 cp .env.example .env
 # Edit .env — set XKC_SECRET_KEY, XKC_ADMIN_PASSWORD, XKC_PUBLIC_URL
@@ -25,24 +116,39 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Server is at `http://localhost:3001`. Default login: `admin` / `changeme` (change immediately).
+Open `http://localhost:3001` — default login is `admin` / `changeme`. Change this immediately.
 
-## Using the Docker image from GitHub
+Or pull directly:
 
 ```bash
 docker run -d \
   --name xkc-server \
   --network host \
   -v xkc_data:/data \
-  -e XKC_SECRET_KEY=your-key \
+  -e XKC_SECRET_KEY=your-secret-key \
   -e XKC_ADMIN_PASSWORD=yourpassword \
   -e XKC_PUBLIC_URL=https://yourdomain.com \
   ghcr.io/tuikat/xkc-server:latest
 ```
 
-## Domain / HTTPS
+### Desktop App
 
-Put XKC behind Caddy (easiest):
+Download the latest installer from [Releases](../../releases/latest):
+
+| Platform | File |
+|---|---|
+| macOS — Apple Silicon | `XKC_x.x.x_aarch64.dmg` |
+| macOS — Intel | `XKC_x.x.x_x64.dmg` |
+| Windows | `XKC_x.x.x_x64-setup.exe` |
+| Linux | `XKC_x.x.x_amd64.AppImage` |
+
+On first launch, enter your server URL (e.g. `https://xkc.io` or `http://192.168.1.x:3001`) and log in.
+
+---
+
+## HTTPS / Domain
+
+Using [Caddy](https://caddyserver.com/) (handles SSL automatically):
 
 ```
 yourdomain.com {
@@ -50,53 +156,11 @@ yourdomain.com {
 }
 ```
 
-Set `XKC_PUBLIC_URL=https://yourdomain.com` in your `.env` before starting.
+Set `XKC_PUBLIC_URL=https://yourdomain.com` before starting.
 
-## Desktop App
-
-Download the latest installer from [Releases](../../releases):
-- macOS: `.dmg` (Apple Silicon or Intel)
-- Windows: `-setup.exe`
-- Linux: `.AppImage`
-
-On first launch, enter your server URL and credentials.
-
-## Streaming Sync (Spotify / SoundCloud)
-
-In the web UI: **Settings → Streaming → Add Source**
-
-- **Spotify**: Paste any public playlist URL. For liked tracks, connect your Spotify account.
-- **SoundCloud**: Paste a public playlist or profile URL.
-- Set sync to `Master Library` (just adds tracks) or `Mirror Playlist` (creates a matching playlist).
-- Auto-sync runs on your chosen schedule; manual sync available any time.
-
-> Note: Audio is sourced via YouTube Music (Spotify) or direct SoundCloud download (yt-dlp). Respects creator availability.
-
-## Rekordbox Import
-
-**Settings → Import → Rekordbox XML**
-
-In Rekordbox: File → Export Collection in xml format → upload the file here. Imports tracks (matched by file path), cues, beat grids, and playlists.
-
-## Pioneer USB Export
-
-Select playlists → **Export → Pioneer USB Format** → download zip.
-
-The zip contains the full `/PIONEER/` directory structure:
-- `rekordbox/export.pdb` — track database (DeviceSQL format)
-- `USBANLZ/` — per-track beat grids and waveforms
-
-Unzip to the root of your USB drive. Works on CDJ-2000NXS, CDJ-2000NXS2, CDJ-3000, XDJ-RX3, XDJ-XZ, and similar.
-
-> Device Library Plus (for OPUS-QUAD, XDJ-AZ, CDJ-3000X) is not yet supported; those devices fall back to the legacy format above.
-
-## Multi-User
-
-Admin can create users and set granular permissions: upload, delete, edit metadata, manage playlists, export, streaming sync, etc.
+---
 
 ## Configuration
-
-All settings via environment variables (prefix `XKC_`):
 
 | Variable | Default | Description |
 |---|---|---|
@@ -105,46 +169,61 @@ All settings via environment variables (prefix `XKC_`):
 | `XKC_ADMIN_PASSWORD` | `changeme` | Bootstrap admin password |
 | `XKC_PUBLIC_URL` | `http://localhost:3001` | Public-facing URL |
 | `XKC_DATA_DIR` | `/data` | Data directory |
-| `XKC_MAX_UPLOAD_MB` | `500` | Max upload file size |
+| `XKC_MAX_UPLOAD_MB` | `500` | Max upload size per file |
 | `XKC_ANALYSIS_WORKERS` | `2` | Analysis thread pool size |
-| `XKC_SPOTIFY_CLIENT_ID` | — | Spotify API (liked tracks) |
-| `XKC_SPOTIFY_CLIENT_SECRET` | — | Spotify API |
+| `XKC_SPOTIFY_CLIENT_ID` | — | Spotify API (optional) |
+| `XKC_SPOTIFY_CLIENT_SECRET` | — | Spotify API (optional) |
 
-Export your full config from **Settings → Export Config**.
+Export your full server config from **Settings → Export Config**.
+
+---
 
 ## Development
 
 ```bash
-# Backend
-cd server && python3 -m venv .venv && source .venv/bin/activate
+# Backend (FastAPI + Python)
+cd server
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 3001
 
-# Frontend
-cd web && npm install && npm run dev   # http://localhost:5173
+# Frontend (React + Vite)
+cd web && npm install && npm run dev
+# → http://localhost:5173
 
-# Desktop
+# Desktop (Tauri)
 cd desktop && npm install
 npm run tauri dev
 ```
 
-## Release Process
-
-Tag a commit to trigger releases:
+Tag to release:
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.x.x && git push origin v1.x.x
 ```
 
-This triggers:
-- GitHub Actions builds Docker image → pushes to `ghcr.io/tuikat/xkc-server:v1.0.0`
-- Tauri builds desktop apps for macOS (Intel + Apple Silicon), Windows, Linux → attached to GitHub Release
+GitHub Actions builds the Docker image and all four desktop installers automatically.
 
-## Compatibility
+---
 
-| Hardware | Format | Status |
-|---|---|---|
-| CDJ-2000NXS, NXS2 | export.pdb | ✅ |
-| CDJ-3000 | export.pdb | ✅ |
-| XDJ-RX3, XDJ-XZ | export.pdb | ✅ |
-| OPUS-QUAD, XDJ-AZ | Device Library Plus | ⏳ V2 |
-| CDJ-3000X | Device Library Plus | ⏳ V2 |
+## ⚖️ Legal Disclaimer
+
+**XKC is an organisational tool only.**
+
+XKC is designed to help DJs organise, manage, and prepare music that they have the legal right to use — music that has been purchased, licensed, self-produced, or is in the public domain.
+
+**You are solely responsible for ensuring you have the appropriate rights, licences, or permissions for any music you upload, store, sync, or export using XKC.** By using this software, you accept full legal responsibility for your use of it.
+
+The developers of XKC:
+- Do not host, distribute, or provide access to any copyrighted music
+- Do not condone the use of XKC to store or distribute music without proper authorisation from rights holders
+- Accept no liability for copyright infringement or any other unlawful use of this software
+
+Streaming sync features (Spotify, SoundCloud) may be subject to those platforms' terms of service. These features are provided for personal archival use only. Respect artists, labels, and rights holders.
+
+---
+
+<div align="center">
+
+Built for DJs &nbsp;·&nbsp; Self-hosted &nbsp;·&nbsp; Open source
+
+</div>
