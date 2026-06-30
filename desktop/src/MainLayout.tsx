@@ -2,13 +2,14 @@ import LocalPanel from './LocalPanel'
 
 interface Props {
   serverUrl: string
+  accessToken: string
   onDisconnect: () => void
 }
 
 const HEADER_H = 36
 const PANEL_H = 200
 
-export default function MainLayout({ serverUrl, onDisconnect }: Props) {
+export default function MainLayout({ serverUrl, accessToken, onDisconnect }: Props) {
   const s: Record<string, React.CSSProperties> = {
     root: { display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f0f', overflow: 'hidden' },
     header: {
@@ -26,6 +27,9 @@ export default function MainLayout({ serverUrl, onDisconnect }: Props) {
     panelWrap: { height: PANEL_H, flexShrink: 0, borderTop: '1px solid #1f1f1f' },
   }
 
+  // Navigate iframe through desktop-login to set auth cookie, then land on /
+  const iframeSrc = `${serverUrl}/api/auth/desktop-login?token=${encodeURIComponent(accessToken)}`
+
   return (
     <div style={s.root}>
       <div style={s.header}>
@@ -38,7 +42,7 @@ export default function MainLayout({ serverUrl, onDisconnect }: Props) {
 
       <div style={s.webviewWrap}>
         <iframe
-          src={serverUrl}
+          src={iframeSrc}
           style={s.iframe}
           allow="clipboard-read; clipboard-write"
           title="XKC Library"

@@ -243,13 +243,28 @@ async def upload_track(
             detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
+    from app.services.audio import compute_file_hash as _hash_file
+
     track_id = str(uuid.uuid4())
     tracks_dir = Path(settings.data_dir) / "tracks"
     tracks_dir.mkdir(parents=True, exist_ok=True)
-    dest = tracks_dir / f"{track_id}{ext}"
 
-    with dest.open("wb") as f:
+    # Write to a temp location first so we can hash before committing
+    tmp_dest = tracks_dir / f"_tmp_{track_id}{ext}"
+    with tmp_dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
+
+    # --- Dedup: check hash against existing tracks ---
+    file_hash = _hash_file(str(tmp_dest))
+    existing = db.query(models.Track).filter(models.Track.file_hash == file_hash).first()
+    if existing:
+        tmp_dest.unlink(missing_ok=True)
+        row = {c.name: getattr(existing, c.name) for c in existing.__table__.columns}
+        row["duplicate"] = True
+        return row
+
+    dest = tracks_dir / f"{track_id}{ext}"
+    tmp_dest.rename(dest)
 
     tags = extract_tags(str(dest))
     artwork_path = extract_artwork(str(dest), track_id, settings.data_dir)
@@ -257,22 +272,39 @@ async def upload_track(
     file_size = dest.stat().st_size
     file_format = ext.lstrip(".")
 
+    raw_title = tags.get("title", Path(file.filename).stem) or Path(file.filename).stem
+    raw_artist = tags.get("artist") or ''
+    raw_remixer = tags.get("remixer") or ''
+
+    # Parse "Artist - Title" from title when artist field is empty
+    if not raw_artist and ' - ' in raw_title:
+        parts = raw_title.split(' - ', 1)
+        if parts[0].strip() and parts[1].strip():
+            raw_artist = parts[0].strip()
+            raw_title = parts[1].strip()
+
+    # Extract remixer from title if not already in tags
+    if not raw_remixer and raw_title:
+        from app.services.metadata import _extract_remixer_from_title
+        raw_remixer = _extract_remixer_from_title(raw_title)
+
     track = models.Track(
         id=track_id,
         file_path=str(dest),
+        file_hash=file_hash,
         file_size=file_size,
         file_format=file_format,
         analysis_state="pending",
         artwork_path=artwork_path,
         uploaded_by=current_user.id,
         source_type="manual",
-        title=tags.get("title", Path(file.filename).stem),
-        artist=tags.get("artist"),
+        title=raw_title,
+        artist=raw_artist or None,
         album=tags.get("album"),
         album_artist=tags.get("album_artist"),
         genre=tags.get("genre"),
         label=tags.get("label"),
-        remixer=tags.get("remixer"),
+        remixer=raw_remixer or None,
         composer=tags.get("composer"),
         comment=tags.get("comment"),
         isrc=tags.get("isrc"),
@@ -295,7 +327,9 @@ async def upload_track(
     if enrich_enabled is None or enrich_enabled.value != 'false':
         background_tasks.add_task(executor.submit, _enrich, track, db)
 
-    return {c.name: getattr(track, c.name) for c in track.__table__.columns}
+    row = {c.name: getattr(track, c.name) for c in track.__table__.columns}
+    row["duplicate"] = False
+    return row
 
 
 @router.get("/{track_id}")
@@ -338,19 +372,90 @@ def update_track(
 def delete_track(
     track_id: str,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_permission("delete")),
+    current_user: models.User = Depends(get_current_user),
 ):
     track = db.query(models.Track).filter(models.Track.id == track_id).first()
     if not track:
         raise HTTPException(status_code=404, detail="Track not found")
-    file_path = Path(track.file_path)
-    if file_path.exists():
-        file_path.unlink()
-    if track.artwork_path:
-        art = Path(track.artwork_path)
-        if art.exists():
-            art.unlink()
-    db.delete(track)
+
+    # Remove track from all playlists this user owns
+    owned_playlist_ids = {
+        p.id for p in db.query(models.Playlist).filter(
+            models.Playlist.owner_id == current_user.id
+        ).all()
+    }
+    db.query(models.PlaylistTrack).filter(
+        models.PlaylistTrack.track_id == track_id,
+        models.PlaylistTrack.playlist_id.in_(owned_playlist_ids),
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    # Hard-delete the record and file only if no playlists still reference it
+    # (i.e. no other user has it in their library)
+    remaining_refs = db.query(models.PlaylistTrack).filter(
+        models.PlaylistTrack.track_id == track_id
+    ).count()
+
+    # Also allow hard delete if the current user is the uploader or admin and no refs remain
+    can_hard_delete = (
+        current_user.is_admin
+        or track.uploaded_by == current_user.id
+    ) and remaining_refs == 0
+
+    if can_hard_delete:
+        file_path = Path(track.file_path) if track.file_path else None
+        if file_path and file_path.exists():
+            file_path.unlink(missing_ok=True)
+        if track.artwork_path:
+            art = Path(track.artwork_path)
+            if art.exists():
+                art.unlink(missing_ok=True)
+        db.delete(track)
+        db.commit()
+
+
+@router.post("/batch-delete", status_code=status.HTTP_204_NO_CONTENT)
+def batch_delete_tracks(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Delete multiple tracks at once. Same smart-delete logic as single delete."""
+    track_ids = body.get("track_ids", [])
+    if not track_ids:
+        return
+
+    owned_playlist_ids = {
+        p.id for p in db.query(models.Playlist).filter(
+            models.Playlist.owner_id == current_user.id
+        ).all()
+    }
+
+    for track_id in track_ids:
+        track = db.query(models.Track).filter(models.Track.id == track_id).first()
+        if not track:
+            continue
+        # Remove from user's playlists
+        if owned_playlist_ids:
+            db.query(models.PlaylistTrack).filter(
+                models.PlaylistTrack.track_id == track_id,
+                models.PlaylistTrack.playlist_id.in_(owned_playlist_ids),
+            ).delete(synchronize_session=False)
+
+        remaining_refs = db.query(models.PlaylistTrack).filter(
+            models.PlaylistTrack.track_id == track_id
+        ).count()
+        can_hard_delete = (
+            current_user.is_admin or track.uploaded_by == current_user.id
+        ) and remaining_refs == 0
+
+        if can_hard_delete:
+            if track.file_path:
+                Path(track.file_path).unlink(missing_ok=True)
+            if track.artwork_path:
+                Path(track.artwork_path).unlink(missing_ok=True)
+            db.delete(track)
+
     db.commit()
 
 

@@ -7,12 +7,15 @@ import uuid
 import zipfile
 import shutil
 import threading
+import logging
 
 from app.database import get_db
 from app.schemas import ExportRequest
 from app.dependencies import require_permission
 from app.config import get_settings
 from app import models
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -73,13 +76,17 @@ def _pioneer_export(job_id: str, playlist_ids: list, db: Session, settings):
             _export_jobs[job_id]["status"] = "running"
 
         from app.services.pdb_export import build_usb_export
-        zip_path = build_usb_export(playlist_ids, db, settings, job_id)
+        from app.database import SessionLocal
+        # Use a fresh DB session (background task — original may be closed)
+        with SessionLocal() as bg_db:
+            zip_path = build_usb_export(playlist_ids, bg_db, settings, job_id)
 
         with _jobs_lock:
             _export_jobs[job_id]["status"] = "complete"
             _export_jobs[job_id]["zip_path"] = str(zip_path)
             _export_jobs[job_id]["progress"] = 100
     except Exception as e:
+        logger.exception(f"Pioneer export {job_id} failed: {e}")
         with _jobs_lock:
             _export_jobs[job_id]["status"] = "failed"
             _export_jobs[job_id]["error"] = str(e)

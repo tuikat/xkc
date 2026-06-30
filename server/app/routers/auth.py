@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, Cookie, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timezone
 
 from app.database import get_db
 from app.schemas import LoginRequest, TokenResponse, RefreshRequest, UserOut
-from app.auth import verify_password, create_session, refresh_session, hash_token
+from app.auth import verify_password, create_session, refresh_session, hash_token, get_user_from_token
 from app.dependencies import get_current_user
 from app import models
 
@@ -95,3 +96,20 @@ def logout(
 @router.get("/me", response_model=UserOut)
 def me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+@router.get("/desktop-login")
+def desktop_login(token: str = "", db: Session = Depends(get_db)):
+    """Validate desktop token, set auth cookie, redirect to web app (used by Tauri iframe handoff)."""
+    user = get_user_from_token(token, db) if token else None
+    resp = RedirectResponse(url="/", status_code=302)
+    if user:
+        resp.set_cookie(
+            key=ACCESS_TOKEN_COOKIE,
+            value=token,
+            httponly=True,
+            samesite="lax",
+            max_age=COOKIE_MAX_AGE,
+            path="/",
+        )
+    return resp

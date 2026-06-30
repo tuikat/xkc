@@ -146,7 +146,7 @@ export default function ActivityLog() {
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-xkc-text truncate">{entry.name}</div>
                       {entry.detail && (
-                        <div className="text-xs text-red-400/80 mt-0.5 break-words">{entry.detail}</div>
+                        <div className={`text-xs mt-0.5 break-words ${entry.status === 'error' ? 'text-red-400/80' : 'text-yellow-400/80'}`}>{entry.detail}</div>
                       )}
                       <div className="text-[10px] text-xkc-muted mt-0.5">
                         {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

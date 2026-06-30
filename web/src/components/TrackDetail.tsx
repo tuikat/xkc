@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { Track, Cue, TagGroup } from '../lib/api'
@@ -39,6 +39,7 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
   const { data: track, isLoading } = useQuery({
     queryKey: ['track', trackId],
     queryFn: () => api.tracks.getTrack(trackId),
+    refetchInterval: 2500,
   })
 
   const { data: trackGenres = [] } = useQuery({
@@ -59,6 +60,7 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
   const [editData, setEditData] = useState<Partial<Track>>({})
   const [isDirty, setIsDirty] = useState(false)
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
+  const prevTrackIdRef = useRef<string | null>(null)
 
   // Genre chip editing
   const [addingGenre, setAddingGenre] = useState(false)
@@ -68,24 +70,31 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
   const [addingTagToGroup, setAddingTagToGroup] = useState<string | null>(null)
   const [newTagName, setNewTagName] = useState('')
 
+  function trackToEditData(t: Track): Partial<Track> {
+    return {
+      title: t.title || '',
+      artist: t.artist || '',
+      album: t.album || '',
+      label: t.label || '',
+      remixer: t.remixer || '',
+      year: t.year || undefined,
+      bpm: t.bpm || undefined,
+      key_camelot: t.key_camelot || '',
+      rating: t.rating,
+      comment: t.comment || '',
+    }
+  }
+
   useEffect(() => {
-    if (track) {
-      setEditData({
-        title: track.title || '',
-        artist: track.artist || '',
-        album: track.album || '',
-        label: track.label || '',
-        remixer: track.remixer || '',
-        year: track.year || undefined,
-        bpm: track.bpm || undefined,
-        key_camelot: track.key_camelot || '',
-        rating: track.rating,
-        comment: track.comment || '',
-      })
+    if (!track) return
+    const isNewTrack = prevTrackIdRef.current !== track.id
+    prevTrackIdRef.current = track.id
+    if (isNewTrack || !isDirty) {
+      setEditData(trackToEditData(track))
       setSelectedTagIds(track.tag_ids || [])
       setIsDirty(false)
     }
-  }, [track?.id])
+  }, [track])
 
   const updateTrack = useMutation({
     mutationFn: (data: Partial<Track>) => api.tracks.updateTrack(trackId, data),

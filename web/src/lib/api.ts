@@ -208,6 +208,8 @@ export const api = {
     updateTrack: (id: string, data: Partial<Track>) =>
       req<Track>(`/api/tracks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteTrack: (id: string) => req<void>(`/api/tracks/${id}`, { method: 'DELETE' }),
+    batchDeleteTracks: (ids: string[]) =>
+      req<void>('/api/tracks/batch-delete', { method: 'POST', body: JSON.stringify({ track_ids: ids }) }),
     addCue: (id: string, data: Partial<Cue>) =>
       req<Cue>(`/api/tracks/${id}/cues`, { method: 'POST', body: JSON.stringify(data) }),
     updateCue: (trackId: string, cueId: string, data: Partial<Cue>) =>
@@ -224,7 +226,7 @@ export const api = {
     getStreamUrl: (id: string) => `/api/tracks/${id}/stream`,
     getWaveform: (id: string) =>
       req<{ overview: number[]; detail: number[]; beat_times_ms: number[] }>(`/api/tracks/${id}/waveform`),
-    uploadTrack: (file: File, onProgress?: (pct: number) => void): Promise<Track> => {
+    uploadTrack: (file: File, onProgress?: (pct: number) => void): Promise<Track & { duplicate?: boolean }> => {
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         const form = new FormData()
@@ -275,7 +277,7 @@ export const api = {
       req<TagGroup>(`/api/tags/groups/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteGroup: (id: string) => req<void>(`/api/tags/groups/${id}`, { method: 'DELETE' }),
     createTag: (data: { group_id: string; name: string; color?: number }) =>
-      req<Tag>('/api/tags', { method: 'POST', body: JSON.stringify(data) }),
+      req<Tag>('/api/tags/', { method: 'POST', body: JSON.stringify(data) }),
     updateTag: (id: string, data: Partial<Tag>) =>
       req<Tag>(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteTag: (id: string) => req<void>(`/api/tags/${id}`, { method: 'DELETE' }),

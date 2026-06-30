@@ -23,7 +23,7 @@ class User(Base):
     permissions = Column(JSON, default=lambda: {
         "upload": True, "delete": False, "edit_metadata": True,
         "manage_playlists": True, "share_playlists": False,
-        "manage_tags": False, "export": True,
+        "manage_tags": True, "export": True,
         "stream_sync": False, "rekordbox_import": False,
     })
     created_at = Column(DateTime, server_default=func.now())

@@ -1,270 +1,265 @@
-"""Pioneer USB export service. Generates export.pdb and USB directory structure."""
-import os
-import io
-import struct
+"""Pioneer USB export — generates rekordbox.xml + ANLZ files for CDJ/XDJ/rekordbox."""
 import shutil
 import zipfile
 import logging
-import hashlib
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-from datetime import datetime
+from typing import List
+
+from lxml import etree
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-PAGE_SIZE = 4096
+# Pioneer cue colours indexed by sort_order (0-7 = hot cues)
+_HOT_CUE_COLORS = [
+    (204, 0, 0),      # Red
+    (204, 102, 0),    # Orange
+    (204, 204, 0),    # Yellow
+    (0, 204, 0),      # Green
+    (0, 204, 204),    # Cyan
+    (0, 0, 204),      # Blue
+    (102, 0, 204),    # Purple
+    (204, 0, 102),    # Pink
+]
 
-# Table type constants (page_type field)
-TABLE_TRACKS = 0
-TABLE_GENRES = 1
-TABLE_ARTISTS = 2
-TABLE_ALBUMS = 3
-TABLE_LABELS = 4
-TABLE_KEYS = 5
-TABLE_COLORS = 6
-TABLE_ARTWORK = 7
-TABLE_PLAYLIST_TREE = 8
-TABLE_PLAYLIST_ENTRIES = 9
-
-
-class PDBWriter:
-    """Minimal Pioneer DeviceSQL PDB writer."""
-
-    def __init__(self):
-        self.pages: List[bytes] = []
-        self._string_cache: Dict[str, int] = {}
-
-    def _pad_page(self, data: bytes) -> bytes:
-        if len(data) > PAGE_SIZE:
-            data = data[:PAGE_SIZE]
-        return data + b'\x00' * (PAGE_SIZE - len(data))
-
-    def _encode_string(self, s: str) -> bytes:
-        """Encode a DeviceSQL string: 1-byte length prefix + UTF-16LE + 2-byte terminator."""
-        if not s:
-            return b'\x00'
-        encoded = s.encode('utf-16-le')
-        length = len(encoded) // 2
-        return bytes([length + 1]) + encoded + b'\x00\x00'
-
-    def _encode_isrc(self, s: str) -> bytes:
-        if not s:
-            return b'\x00'
-        b = s.encode('ascii', errors='replace')[:12]
-        return bytes([len(b)]) + b
-
-    def add_page(self, page_type: int, rows_data: List[bytes]) -> int:
-        """Add a table page. Returns page index."""
-        header = struct.pack(
-            '<IIIIHHHHHHIIIII',
-            page_type,        # page_type
-            0,                # unknown
-            0,                # next_page (0 = last)
-            0,                # unknown
-            len(rows_data),   # num_rows_large
-            0,                # unknown
-            0,                # free_size
-            0,                # used_size
-            0,                # unknown
-            len(rows_data),   # num_rows_small
-            0, 0, 0, 0, 0     # unknown x5
-        )
-        rows_blob = b''
-        offsets = []
-        for row in rows_data:
-            offsets.append(40 + len(offsets) * 2 + len(rows_blob))
-            rows_blob += row
-
-        offset_data = struct.pack(f'<{len(offsets)}H', *offsets) if offsets else b''
-        content = header + offset_data + rows_blob
-        page = self._pad_page(content)
-        idx = len(self.pages)
-        self.pages.append(page)
-        return idx
-
-    def write(self, path: str):
-        with open(path, 'wb') as f:
-            for page in self.pages:
-                f.write(page)
+_KIND_MAP = {
+    '.mp3': 'MP3 File', '.flac': 'FLAC File', '.wav': 'WAV File',
+    '.aiff': 'AIFF File', '.aif': 'AIFF File', '.m4a': 'AAC File',
+    '.aac': 'AAC File', '.ogg': 'OGG File', '.opus': 'OGG File',
+}
 
 
-def _text_row(row_id: int, name: str) -> bytes:
-    """Generic ID + name row (artists, genres, etc.)"""
-    name_bytes = name.encode('utf-8', errors='replace')[:254] + b'\x00'
-    return struct.pack('<HH', row_id, len(name_bytes)) + name_bytes
+def _pioneer_rating(rating: int) -> int:
+    """Convert 0-5 star rating to Pioneer 0-255 scale."""
+    if not rating:
+        return 0
+    return min(255, int((rating / 5) * 255))
 
 
-def _track_row(
-    track_id: int, title: str, artist_id: int, album_id: int,
-    genre_id: int, duration: int, bpm_x100: int, key_id: int,
-    rating: int, file_path: str, comment: str
-) -> bytes:
-    """Simplified track row for export.pdb."""
-    title_b = title.encode('utf-8', errors='replace')[:254] + b'\x00'
-    path_b = file_path.encode('utf-8', errors='replace')[:510] + b'\x00'
-    comment_b = (comment or '').encode('utf-8', errors='replace')[:254] + b'\x00'
-    return (
-        struct.pack('<HHHHHIII',
-                    track_id, artist_id, album_id, genre_id,
-                    key_id, rating, duration, bpm_x100)
-        + struct.pack(f'<H{len(title_b)}s', len(title_b), title_b)
-        + struct.pack(f'<H{len(path_b)}s', len(path_b), path_b)
-        + struct.pack(f'<H{len(comment_b)}s', len(comment_b), comment_b)
-    )
+def _cue_type_num(cue_type: str) -> str:
+    """Return Pioneer numeric Type value for POSITION_MARK."""
+    mapping = {'hot': '0', 'memory': '0', 'fadein': '1',
+               'fadeout': '2', 'load': '3', 'loop': '4'}
+    return mapping.get(cue_type, '0')
 
 
-def _playlist_tree_row(playlist_id: int, parent_id: int, name: str, is_folder: int) -> bytes:
-    name_b = name.encode('utf-8', errors='replace')[:254] + b'\x00'
-    return struct.pack('<HHIH', playlist_id, parent_id, is_folder, len(name_b)) + name_b
+def _build_rekordbox_xml(tracks_data: list, playlists_data: list) -> bytes:
+    """Generate a complete rekordbox.xml for Pioneer CDJ/XDJ/rekordbox import."""
+    root = etree.Element('DJ_PLAYLISTS', Version="1.0.0")
+    etree.SubElement(root, 'PRODUCT', Name="rekordbox", Version="6.8.5", Company="Pioneer DJ")
 
+    collection = etree.SubElement(root, 'COLLECTION', Entries=str(len(tracks_data)))
+    track_id_map: dict[str, int] = {}
 
-def _playlist_entry_row(entry_id: int, playlist_id: int, track_id: int, position: int) -> bytes:
-    return struct.pack('<HHHH', entry_id, playlist_id, track_id, position)
+    for idx, t in enumerate(tracks_data):
+        int_id = idx + 1
+        track_id_map[t['id']] = int_id
+
+        src_path = t.get('file_path') or ''
+        ext = Path(src_path).suffix.lower() if src_path else '.mp3'
+        file_fmt = (t.get('file_format') or '').lower()
+        kind = _KIND_MAP.get(f'.{file_fmt}' if file_fmt else ext, _KIND_MAP.get(ext, 'MP3 File'))
+        usb_rel = f"Contents/{t['id']}{ext}"
+
+        bpm = t.get('bpm')
+        bpm_str = f"{bpm:.2f}" if bpm else "0.00"
+        duration_s = int((t.get('duration_ms') or 0) / 1000)
+        date_added = (t.get('date_added') or '')[:10] or '2024-01-01'
+        bitrate = t.get('bitrate') or 0
+        size = Path(src_path).stat().st_size if src_path and Path(src_path).exists() else 0
+
+        attrs = {
+            'TrackID': str(int_id),
+            'Name': t.get('title') or '',
+            'Artist': t.get('artist') or '',
+            'Composer': '',
+            'Album': t.get('album') or '',
+            'Grouping': '',
+            'Genre': t.get('genre') or '',
+            'Kind': kind,
+            'Size': str(size),
+            'TotalTime': str(duration_s),
+            'DiscNumber': '0',
+            'TrackNumber': '0',
+            'Year': str(t.get('year') or ''),
+            'AverageBpm': bpm_str,
+            'DateModified': date_added,
+            'DateAdded': date_added,
+            'BitRate': str(bitrate),
+            'SampleRate': '44100',
+            'Comments': t.get('comment') or '',
+            'PlayCount': str(t.get('play_count') or 0),
+            'LastPlayed': '',
+            'Rating': str(_pioneer_rating(t.get('rating') or 0)),
+            'Location': f"file://localhost/{usb_rel}",
+            'Remixer': t.get('remixer') or '',
+            'Tonality': t.get('key_musical') or '',
+            'Label': t.get('label') or '',
+            'Mix': '',
+            'Colour': '0',
+        }
+        track_el = etree.SubElement(collection, 'TRACK', **attrs)
+
+        # Beat grid TEMPO entry — CDJs use this for beat sync
+        if bpm:
+            etree.SubElement(track_el, 'TEMPO',
+                             Inizio="0.000", Bpm=bpm_str,
+                             Metro="4/4", Battito="1")
+
+        # Cue points
+        for cue in sorted(t.get('cues', []), key=lambda c: c.get('sort_order', 0)):
+            pos_s = cue['position_ms'] / 1000.0
+            cue_type = cue.get('type', 'hot')
+            sort = cue.get('sort_order', 0)
+            num = sort if cue_type == 'hot' else -1
+            r, g, b = _HOT_CUE_COLORS[sort % len(_HOT_CUE_COLORS)] if cue_type == 'hot' else (255, 255, 0)
+            mark_attrs = {
+                'Name': cue.get('label') or '',
+                'Type': _cue_type_num(cue_type),
+                'Start': f"{pos_s:.3f}",
+                'Num': str(num),
+                'Red': str(r), 'Green': str(g), 'Blue': str(b),
+            }
+            if cue_type == 'loop' and cue.get('loop_length_ms'):
+                end_s = (cue['position_ms'] + cue['loop_length_ms']) / 1000.0
+                mark_attrs['End'] = f"{end_s:.3f}"
+            etree.SubElement(track_el, 'POSITION_MARK', **mark_attrs)
+
+    # Playlists
+    playlists_el = etree.SubElement(root, 'PLAYLISTS')
+    root_node = etree.SubElement(playlists_el, 'NODE', Type="0", Name="ROOT",
+                                 Count=str(len(playlists_data)))
+    for pl in playlists_data:
+        track_ids = pl.get('track_ids', [])
+        pl_node = etree.SubElement(root_node, 'NODE', Type="1",
+                                   Name=pl['name'], KeyType="0",
+                                   Entries=str(len(track_ids)))
+        for t_uuid in track_ids:
+            int_id = track_id_map.get(t_uuid)
+            if int_id:
+                etree.SubElement(pl_node, 'TRACK', Key=str(int_id))
+
+    return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding='UTF-8')
 
 
 def build_usb_export(
     playlist_ids: List[str],
-    tracks_data: List[dict],
-    playlists_data: List[dict],
-    output_dir: str,
-    data_dir: str,
+    db: Session,
+    settings,
+    job_id: str,
 ) -> str:
-    """
-    Build Pioneer USB structure in output_dir.
-    Returns path to output_dir.
-    """
-    pioneer_dir = Path(output_dir) / "PIONEER"
-    rb_dir = pioneer_dir / "rekordbox"
-    anlz_dir = pioneer_dir / "USBANLZ"
-    content_dir = Path(output_dir) / "Contents"
-    for d in [rb_dir, anlz_dir, content_dir]:
+    """Build Pioneer USB structure as a ZIP and return the ZIP file path."""
+    from app import models
+
+    playlists = (
+        db.query(models.Playlist)
+        .filter(models.Playlist.id.in_(playlist_ids))
+        .all()
+    )
+
+    seen_ids: set = set()
+    ordered_tracks: list = []
+    playlists_data: list = []
+
+    for pl in playlists:
+        track_ids = []
+        for pt in sorted(pl.tracks, key=lambda x: x.position):
+            track = pt.track
+            if track.id not in seen_ids:
+                seen_ids.add(track.id)
+                beat = (db.query(models.Beat).filter(models.Beat.track_id == track.id).first())
+                cues_raw = [
+                    {
+                        'position_ms': c.position_ms,
+                        'type': c.type,
+                        'label': c.label,
+                        'sort_order': c.sort_order,
+                        'loop_length_ms': c.loop_length_ms,
+                    }
+                    for c in track.cues
+                ]
+                ordered_tracks.append({
+                    'id': track.id,
+                    'title': track.title,
+                    'artist': track.artist,
+                    'album': track.album,
+                    'genre': track.genre,
+                    'label': track.label,
+                    'remixer': track.remixer,
+                    'year': track.year,
+                    'bpm': track.bpm,
+                    'key_musical': track.key_musical,
+                    'duration_ms': track.duration_ms,
+                    'bitrate': track.bitrate,
+                    'file_format': track.file_format,
+                    'date_added': str(track.date_added) if track.date_added else None,
+                    'rating': track.rating,
+                    'play_count': track.play_count,
+                    'comment': track.comment,
+                    'file_path': track.file_path,
+                    'anlz_path': track.anlz_path,
+                    'cues': cues_raw,
+                    'beat_times_ms': beat.beat_positions_ms if beat else [],
+                })
+            track_ids.append(track.id)
+        playlists_data.append({'name': pl.name, 'track_ids': track_ids})
+
+    export_dir = Path(settings.data_dir) / "exports" / job_id
+    content_dir = export_dir / "Contents"
+    pioneer_dir = export_dir / "PIONEER" / "rekordbox"
+    anlz_dir = export_dir / "PIONEER" / "USBANLZ"
+    for d in [content_dir, pioneer_dir, anlz_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
-    artists: Dict[str, int] = {}
-    albums: Dict[str, int] = {}
-    genres: Dict[str, int] = {}
+    # Write rekordbox.xml (root level + inside PIONEER/rekordbox for older CDJs)
+    xml_bytes = _build_rekordbox_xml(ordered_tracks, playlists_data)
+    (export_dir / "rekordbox.xml").write_bytes(xml_bytes)
+    (pioneer_dir / "rekordbox.xml").write_bytes(xml_bytes)
 
-    def get_or_add(d: dict, key: str) -> int:
-        if not key:
-            key = "Unknown"
-        if key not in d:
-            d[key] = len(d) + 1
-        return d[key]
-
-    writer = PDBWriter()
-
-    track_rows = []
-    track_id_map: Dict[str, int] = {}
-    for i, t in enumerate(tracks_data):
-        int_id = i + 1
-        track_id_map[t['id']] = int_id
-        artist_id = get_or_add(artists, t.get('artist') or 'Unknown Artist')
-        album_id = get_or_add(albums, t.get('album') or 'Unknown Album')
-        genre_id = get_or_add(genres, t.get('genre') or 'Unknown Genre')
-        src_path = t.get('file_path', '')
-        ext = Path(src_path).suffix if src_path else '.mp3'
-        usb_path = f"/Contents/{t['id']}{ext}"
-        bpm_x100 = int((t.get('bpm') or 0) * 100)
-        row = _track_row(
-            track_id=int_id,
-            title=t.get('title') or 'Unknown',
-            artist_id=artist_id,
-            album_id=album_id,
-            genre_id=genre_id,
-            duration=int((t.get('duration_ms') or 0) / 1000),
-            bpm_x100=bpm_x100,
-            key_id=0,
-            rating=t.get('rating') or 0,
-            file_path=usb_path,
-            comment=t.get('comment') or '',
-        )
-        track_rows.append(row)
-
-    if track_rows:
-        writer.add_page(TABLE_TRACKS, track_rows)
-    if artists:
-        writer.add_page(TABLE_ARTISTS, [_text_row(v, k) for k, v in artists.items()])
-    if albums:
-        writer.add_page(TABLE_ALBUMS, [_text_row(v, k) for k, v in albums.items()])
-    if genres:
-        writer.add_page(TABLE_GENRES, [_text_row(v, k) for k, v in genres.items()])
-
-    playlist_rows = []
-    pl_entry_rows = []
-    entry_id = 1
-    for pl in playlists_data:
-        pl_int_id = len(playlist_rows) + 1
-        playlist_rows.append(_playlist_tree_row(pl_int_id, 0, pl['name'], 0))
-        for pos, t_uuid in enumerate(pl.get('track_ids', [])):
-            t_int_id = track_id_map.get(t_uuid)
-            if t_int_id:
-                pl_entry_rows.append(_playlist_entry_row(entry_id, pl_int_id, t_int_id, pos))
-                entry_id += 1
-
-    if playlist_rows:
-        writer.add_page(TABLE_PLAYLIST_TREE, playlist_rows)
-    if pl_entry_rows:
-        writer.add_page(TABLE_PLAYLIST_ENTRIES, pl_entry_rows)
-
-    writer.write(str(rb_dir / "export.pdb"))
-
-    # Copy audio files and ANLZ
-    for t in tracks_data:
-        src = t.get('file_path', '')
+    # Copy audio files and ANLZ data
+    for t in ordered_tracks:
+        src = t.get('file_path') or ''
         if src and Path(src).exists():
             ext = Path(src).suffix
-            dst = content_dir / f"{t['id']}{ext}"
-            shutil.copy2(src, dst)
+            shutil.copy2(src, content_dir / f"{t['id']}{ext}")
 
         anlz_src = t.get('anlz_path')
         if anlz_src and Path(anlz_src).exists():
             anlz_dst = anlz_dir / t['id']
             anlz_dst.mkdir(parents=True, exist_ok=True)
             for f in Path(anlz_src).iterdir():
-                shutil.copy2(f, anlz_dst / f.name)
+                if f.is_file():
+                    shutil.copy2(f, anlz_dst / f.name)
+            # Re-generate ANLZ with cue points if we have beat data
+            if t.get('beat_times_ms') or t.get('cues'):
+                _regenerate_anlz_with_cues(t, anlz_dst)
 
-    return output_dir
+    zip_path = Path(settings.data_dir) / "exports" / f"{job_id}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
+        for f in export_dir.rglob("*"):
+            if f.is_file():
+                zf.write(f, f.relative_to(export_dir))
+
+    shutil.rmtree(export_dir)
+    logger.info(f"Pioneer export complete: {zip_path} ({len(ordered_tracks)} tracks)")
+    return str(zip_path)
 
 
-def generate_rekordbox_xml(tracks_data: List[dict], playlists_data: List[dict]) -> str:
-    """Generate rekordbox.xml format as a fallback/additional export."""
-    from lxml import etree
-    root = etree.Element('DJ_PLAYLISTS', Version="1.0.0")
-    etree.SubElement(root, 'PRODUCT', Name="XKC", Version="1.0", Company="XKC")
-
-    collection = etree.SubElement(root, 'COLLECTION', Entries=str(len(tracks_data)))
-    for idx, t in enumerate(tracks_data):
-        track_el = etree.SubElement(collection, 'TRACK')
-        track_el.set('TrackID', str(idx + 1))
-        track_el.set('Name', t.get('title') or '')
-        track_el.set('Artist', t.get('artist') or '')
-        track_el.set('Album', t.get('album') or '')
-        track_el.set('Genre', t.get('genre') or '')
-        track_el.set('Kind', 'MP3 File')
-        track_el.set('TotalTime', str(int((t.get('duration_ms') or 0) / 1000)))
-        track_el.set('AverageBpm', str(t.get('bpm') or ''))
-        track_el.set('Tonality', t.get('key_musical') or '')
-        track_el.set('Rating', str(t.get('rating') or 0))
-        track_el.set('Location', f"file://localhost{t.get('file_path', '')}")
-        track_el.set('Comments', t.get('comment') or '')
-
-        for cue in t.get('cues', []):
-            pos = cue['position_ms'] / 1000.0
-            cue_el = etree.SubElement(track_el, 'POSITION_MARK')
-            cue_el.set('Name', cue.get('label') or '')
-            cue_el.set('Type', '0' if cue['type'] == 'hot' else '1')
-            cue_el.set('Start', f"{pos:.3f}")
-            cue_el.set('Num', str(cue.get('sort_order', 0)))
-
-    playlists_el = etree.SubElement(root, 'PLAYLISTS')
-    root_node = etree.SubElement(playlists_el, 'NODE', Type="0", Name="ROOT",
-                                  Count=str(len(playlists_data)))
-    for pl in playlists_data:
-        pl_node = etree.SubElement(root_node, 'NODE', Type="1", Name=pl['name'],
-                                    KeyType="0", Entries=str(len(pl.get('track_ids', []))))
-        for t_uuid in pl.get('track_ids', []):
-            found_idx = next((i + 1 for i, t in enumerate(tracks_data) if t['id'] == t_uuid), None)
-            if found_idx:
-                etree.SubElement(pl_node, 'TRACK', Key=str(found_idx))
-
-    return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding='UTF-8').decode()
+def _regenerate_anlz_with_cues(track_data: dict, anlz_dst: Path) -> None:
+    """Overwrite ANLZ files for this track, adding cue points to the EXT file."""
+    try:
+        from app.services.anlz import generate_anlz_with_cues
+        beat_times = track_data.get('beat_times_ms') or []
+        bpm = track_data.get('bpm') or 0
+        duration_ms = track_data.get('duration_ms') or 0
+        cues = track_data.get('cues') or []
+        generate_anlz_with_cues(
+            track_id=track_data['id'],
+            beat_times_ms=beat_times,
+            bpm=float(bpm),
+            duration_ms=int(duration_ms),
+            cues=cues,
+            anlz_dir=str(anlz_dst),
+        )
+    except Exception as e:
+        logger.warning(f"ANLZ cue regeneration failed for {track_data['id']}: {e}")

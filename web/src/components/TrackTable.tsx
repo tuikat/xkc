@@ -17,7 +17,7 @@ interface TrackTableProps {
   tagGroups?: { id: string; name: string; tags: Tag[] }[]
   playlists?: { id: string; name: string }[]
   onAddToPlaylist?: (trackId: string, playlistId: string) => void
-  onDeleteTrack?: (trackId: string) => void
+  onDeleteTrack?: (trackIds: string | string[]) => void
   onReanalyze?: (trackId: string) => void
   isSharedPlaylist?: boolean
 }
@@ -31,6 +31,7 @@ interface ColDef {
 }
 
 const ALL_COLS: ColDef[] = [
+  { id: 'art',        label: 'Art',    width: '34px' },
   { id: 'wave',       label: 'Wave',   width: '100px' },
   { id: 'title',      label: 'Title',  width: '180px', sortKey: 'title' },
   { id: 'artist',     label: 'Artist', width: '160px', sortKey: 'artist', filterable: true },
@@ -83,13 +84,16 @@ function drawMiniWave(canvas: HTMLCanvasElement, pts: number[], isPlaying: boole
   }
 }
 
-function MiniWaveform({ trackId, isPlaying }: { trackId: string; isPlaying: boolean }) {
+function MiniWaveform({ trackId, analysisState, isPlaying }: { trackId: string; analysisState: string; isPlaying: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { data } = useQuery({
-    queryKey: ['waveform', trackId],
+    queryKey: ['waveform', trackId, analysisState],
     queryFn: () => api.tracks.getWaveform(trackId),
-    staleTime: Infinity, gcTime: Infinity,
-    retry: 2,
+    // Don't cache when analysis is not done — re-fetch when state changes
+    staleTime: analysisState === 'complete' ? Infinity : 0,
+    gcTime: analysisState === 'complete' ? Infinity : 0,
+    enabled: analysisState === 'complete',
+    retry: 1,
   })
 
   // useLayoutEffect so we draw synchronously after paint — prevents the "cached
@@ -224,9 +228,20 @@ export default function TrackTable({
   // ---- Cell renderers ----
   function renderCell(col: ColDef, track: Track, isPlaying: boolean, canPlay: boolean) {
     switch (col.id) {
+      case 'art':
+        return track.artwork_path
+          ? <img
+              src={`/api/tracks/${track.id}/artwork`}
+              alt=""
+              className="w-7 h-7 rounded object-cover flex-shrink-0"
+              loading="lazy"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+          : <div className="w-7 h-7 rounded bg-xkc-border/40 flex-shrink-0" />
+
       case 'wave':
         return canPlay
-          ? <MiniWaveform trackId={track.id} isPlaying={isPlaying} />
+          ? <MiniWaveform trackId={track.id} analysisState={track.analysis_state} isPlaying={isPlaying} />
           : <div className="h-6 rounded bg-xkc-border/20 flex items-center px-1"><span className="text-[9px] text-xkc-muted">{track.analysis_state}</span></div>
 
       case 'title':
@@ -623,7 +638,7 @@ export default function TrackTable({
             <>
               <div className="border-t border-xkc-border my-1" />
               <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-red-400"
-                onClick={() => { contextMenu.trackIds.forEach(id => onDeleteTrack(id)); setContextMenu(null) }}>
+                onClick={() => { onDeleteTrack(contextMenu.trackIds); setContextMenu(null) }}>
                 Delete {contextMenu.trackIds.length > 1 ? `${contextMenu.trackIds.length} tracks` : 'track'}
               </button>
             </>

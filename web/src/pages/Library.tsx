@@ -98,7 +98,10 @@ export default function Library() {
   }, [hasAnalyzing, qc])
 
   const deleteTrack = useMutation({
-    mutationFn: api.tracks.deleteTrack,
+    mutationFn: (ids: string | string[]) =>
+      Array.isArray(ids)
+        ? api.tracks.batchDeleteTracks(ids)
+        : api.tracks.batchDeleteTracks([ids]),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tracks'] })
       if (selectedTrackId) setSelectedTrackId(null)
@@ -130,10 +133,15 @@ export default function Library() {
         updateQueueItem(qid, { status: 'uploading' })
         addLog({ id: qid, name: file.name, status: 'uploading', ts: Date.now() })
         try {
-          await api.tracks.uploadTrack(file, (pct) => updateQueueItem(qid, { progress: pct }))
-          updateQueueItem(qid, { status: 'complete', progress: 100 })
-          updateLog(qid, { status: 'complete' })
-          qc.invalidateQueries({ queryKey: ['tracks'] })
+          const result = await api.tracks.uploadTrack(file, (pct) => updateQueueItem(qid, { progress: pct }))
+          if (result?.duplicate) {
+            updateQueueItem(qid, { status: 'complete', progress: 100 })
+            updateLog(qid, { status: 'complete', detail: 'Already in library (skipped)' })
+          } else {
+            updateQueueItem(qid, { status: 'complete', progress: 100 })
+            updateLog(qid, { status: 'complete' })
+            qc.invalidateQueries({ queryKey: ['tracks'] })
+          }
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Upload failed'
           updateQueueItem(qid, { status: 'error', error: msg })
@@ -295,7 +303,7 @@ export default function Library() {
                     qc.invalidateQueries({ queryKey: ['tracks'] })
                   )
                 }}
-                onDeleteTrack={(id) => deleteTrack.mutate(id)}
+                onDeleteTrack={(ids) => deleteTrack.mutate(ids)}
                 onReanalyze={(id) => reanalyze.mutate(id)}
               />
             </div>

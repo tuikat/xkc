@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { StreamSource } from '../lib/api'
-import { ArrowLeft, Plus, Trash2, RefreshCw, Download } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, RefreshCw, Download, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useStore } from '../lib/store'
 
-type Tab = 'general' | 'streaming' | 'export' | 'import'
+type Tab = 'general' | 'tags' | 'streaming' | 'export' | 'import'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -24,7 +24,7 @@ export default function Settings() {
       <div className="flex flex-1">
         {/* Tab nav */}
         <nav className="w-48 border-r border-xkc-border p-4 space-y-1">
-          {(['general', 'streaming', 'export', 'import'] as Tab[]).map((t) => (
+          {(['general', 'tags', 'streaming', 'export', 'import'] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -41,10 +41,107 @@ export default function Settings() {
         {/* Tab content */}
         <div className="flex-1 p-6 max-w-2xl">
           {tab === 'general' && <GeneralTab />}
+          {tab === 'tags' && <TagsTab />}
           {tab === 'streaming' && <StreamingTab />}
           {tab === 'export' && <ExportTab />}
           {tab === 'import' && <ImportTab />}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function TagsTab() {
+  const qc = useQueryClient()
+  const { data: tagGroups = [] } = useQuery({ queryKey: ['tagGroups'], queryFn: api.tags.getTagGroups })
+  const [newTagName, setNewTagName] = useState<Record<string, string>>({})
+  const [newGroupName, setNewGroupName] = useState('')
+
+  const createTag = useMutation({
+    mutationFn: ({ groupId, name }: { groupId: string; name: string }) =>
+      api.tags.createTag({ group_id: groupId, name }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tagGroups'] }),
+  })
+  const deleteTag = useMutation({
+    mutationFn: (id: string) => api.tags.deleteTag(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tagGroups'] }),
+  })
+  const createGroup = useMutation({
+    mutationFn: (name: string) => api.tags.createGroup({ name }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tagGroups'] }); setNewGroupName('') },
+  })
+  const deleteGroup = useMutation({
+    mutationFn: (id: string) => api.tags.deleteGroup(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tagGroups'] }),
+  })
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-sm font-medium text-xkc-text mb-1">Tag Groups</h2>
+        <p className="text-xs text-xkc-muted mb-4">
+          Manage your tag groups and their tags. The <strong>Genre</strong> group tags appear as quick-select options when editing a track's genre.
+        </p>
+        <div className="space-y-4">
+          {tagGroups.map(group => (
+            <div key={group.id} className="bg-xkc-surface border border-xkc-border rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm font-medium text-xkc-text">{group.name}</span>
+                <button onClick={() => deleteGroup.mutate(group.id)}
+                  className="text-xkc-muted hover:text-red-400 transition-colors" title="Delete group">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {group.tags.map(tag => (
+                  <span key={tag.id}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-bg border border-xkc-border text-xs text-xkc-text">
+                    {tag.name}
+                    <button onClick={() => deleteTag.mutate(tag.id)}
+                      className="text-xkc-muted hover:text-red-400 ml-0.5">
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+                {group.tags.length === 0 && (
+                  <span className="text-xs text-xkc-muted">No tags yet</span>
+                )}
+              </div>
+              <form onSubmit={e => {
+                e.preventDefault()
+                const val = (newTagName[group.id] || '').trim()
+                if (val) {
+                  createTag.mutate({ groupId: group.id, name: val })
+                  setNewTagName(prev => ({ ...prev, [group.id]: '' }))
+                }
+              }} className="flex gap-2">
+                <input
+                  value={newTagName[group.id] || ''}
+                  onChange={e => setNewTagName(prev => ({ ...prev, [group.id]: e.target.value }))}
+                  placeholder={`Add ${group.name} tag…`}
+                  className="flex-1 bg-xkc-bg border border-xkc-border rounded px-2 py-1 text-xs text-xkc-text focus:outline-none focus:border-xkc-accent"
+                />
+                <button type="submit"
+                  className="px-2 py-1 rounded bg-xkc-accent text-white text-xs hover:bg-blue-600">
+                  <Plus size={12} />
+                </button>
+              </form>
+            </div>
+          ))}
+        </div>
+        <form onSubmit={e => { e.preventDefault(); if (newGroupName.trim()) createGroup.mutate(newGroupName.trim()) }}
+          className="flex gap-2 mt-4">
+          <input
+            value={newGroupName}
+            onChange={e => setNewGroupName(e.target.value)}
+            placeholder="New tag group name…"
+            className="flex-1 bg-xkc-bg border border-xkc-border rounded-lg px-3 py-1.5 text-sm text-xkc-text focus:outline-none focus:border-xkc-accent"
+          />
+          <button type="submit"
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-xkc-accent text-white text-xs hover:bg-blue-600">
+            <Plus size={12} /> Add Group
+          </button>
+        </form>
       </div>
     </div>
   )

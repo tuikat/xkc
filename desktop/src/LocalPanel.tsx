@@ -8,17 +8,29 @@ interface WatchedFolder {
 }
 
 interface UsbDevice {
-  mountPoint: string
+  mount_point: string
   name: string
-  status: 'idle' | 'syncing' | 'not_configured'
-  autoSync?: boolean
+  is_pioneer: boolean
+  status: 'idle' | 'syncing'
   playlistIds?: string[]
+}
+
+interface DownloadSync {
+  id: string
+  path: string
+  playlist_id: string
+  playlist_name: string
+}
+
+interface ServerPlaylist {
+  id: string
+  name: string
 }
 
 interface SyncLogEntry {
   id: string
   timestamp: string
-  type: 'upload' | 'usb_sync' | 'error' | 'info'
+  type: 'upload' | 'usb_sync' | 'download' | 'error' | 'info'
   message: string
 }
 
@@ -26,7 +38,6 @@ interface Props {
   serverUrl: string
 }
 
-// Safe invoke wrapper - falls back gracefully when not in Tauri context
 async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
@@ -51,8 +62,17 @@ export default function LocalPanel({ serverUrl }: Props) {
     try { return JSON.parse(localStorage.getItem('xkc_watched_folders') || '[]') } catch { return [] }
   })
   const [usbDevices, setUsbDevices] = useState<UsbDevice[]>([])
+  const [downloadSyncs, setDownloadSyncs] = useState<DownloadSync[]>(() => {
+    try { return JSON.parse(localStorage.getItem('xkc_download_syncs') || '[]') } catch { return [] }
+  })
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([])
-  const [activeSection, setActiveSection] = useState<'folders' | 'usb' | 'log'>('folders')
+  const [activeSection, setActiveSection] = useState<'folders' | 'usb' | 'downloads' | 'log'>('folders')
+
+  // For "Add Download Sync" form
+  const [showAddDownload, setShowAddDownload] = useState(false)
+  const [newSyncPath, setNewSyncPath] = useState<string | null>(null)
+  const [newSyncPlaylistId, setNewSyncPlaylistId] = useState('')
+  const [playlists, setPlaylists] = useState<ServerPlaylist[]>([])
 
   const addLog = useCallback((type: SyncLogEntry['type'], message: string) => {
     setSyncLog(prev => [{
@@ -60,24 +80,30 @@ export default function LocalPanel({ serverUrl }: Props) {
       timestamp: new Date().toLocaleTimeString(),
       type,
       message,
-    }, ...prev].slice(0, 20))
+    }, ...prev].slice(0, 30))
   }, [])
 
-  // Persist folders
   useEffect(() => {
     localStorage.setItem('xkc_watched_folders', JSON.stringify(folders))
   }, [folders])
 
+  useEffect(() => {
+    localStorage.setItem('xkc_download_syncs', JSON.stringify(downloadSyncs))
+  }, [downloadSyncs])
+
   // Poll USB devices
   useEffect(() => {
     const poll = async () => {
-      const mounts = await tauriInvoke<string[]>('get_usb_devices')
-      if (mounts) {
-        setUsbDevices(mounts.map(mp => ({
-          mountPoint: mp,
-          name: mp.split('/').filter(Boolean).pop() || mp,
-          status: 'idle',
-        })))
+      const devices = await tauriInvoke<{ mount_point: string; name: string; is_pioneer: boolean }[]>('get_usb_devices')
+      if (devices) {
+        setUsbDevices(prev => devices.map(d => {
+          const existing = prev.find(p => p.mount_point === d.mount_point)
+          return {
+            ...d,
+            status: existing?.status ?? 'idle',
+            playlistIds: existing?.playlistIds,
+          }
+        }))
       }
     }
     poll()
@@ -85,14 +111,26 @@ export default function LocalPanel({ serverUrl }: Props) {
     return () => clearInterval(interval)
   }, [])
 
+  // Fetch playlists when Add Download Sync is opened
+  useEffect(() => {
+    if (!showAddDownload) return
+    const token = localStorage.getItem('xkc_access_token') || ''
+    fetch(`${serverUrl}/api/playlists/`, {
+      headers: { Cookie: `access_token=${token}` },
+      credentials: 'include',
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: ServerPlaylist[]) => setPlaylists(data))
+      .catch(() => setPlaylists([]))
+  }, [showAddDownload, serverUrl])
+
   const addFolder = async () => {
     const path = await tauriDialog()
     if (!path) return
     if (folders.find(f => f.path === path)) return
     const folder: WatchedFolder = { path, autoSync: true, status: 'idle' }
     setFolders(prev => [...prev, folder])
-
-    const token = localStorage.getItem('xkc_refresh_token') || ''
+    const token = localStorage.getItem('xkc_access_token') || ''
     await tauriInvoke('start_folder_watch', { path, serverUrl, token })
     addLog('info', `Started watching: ${path}`)
   }
@@ -108,32 +146,98 @@ export default function LocalPanel({ serverUrl }: Props) {
   }
 
   const syncUsb = async (device: UsbDevice) => {
-    const token = localStorage.getItem('xkc_refresh_token') || ''
-    setUsbDevices(prev => prev.map(d => d.mountPoint === device.mountPoint ? { ...d, status: 'syncing' } : d))
+    const token = localStorage.getItem('xkc_access_token') || ''
+    setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'syncing' } : d))
     addLog('usb_sync', `Syncing to ${device.name}...`)
     const result = await tauriInvoke<string>('sync_usb', {
-      mountPoint: device.mountPoint,
+      mountPoint: device.mount_point,
       serverUrl,
       token,
       playlistIds: device.playlistIds || [],
     })
-    setUsbDevices(prev => prev.map(d => d.mountPoint === device.mountPoint ? { ...d, status: 'idle' } : d))
-    addLog(result ? 'usb_sync' : 'error', result ? `USB sync complete: ${device.name}` : `USB sync failed: ${device.name}`)
+    setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'idle' } : d))
+    if (result) {
+      addLog('usb_sync', `Done: ${result}`)
+    } else {
+      addLog('error', `USB sync failed: ${device.name}`)
+    }
+  }
+
+  const formatUsb = async (device: UsbDevice) => {
+    if (!window.confirm(`Format "${device.name}" as Pioneer USB?\n\nThis will create the Pioneer folder structure. Existing non-Pioneer files will not be affected.`)) return
+    const result = await tauriInvoke<string>('format_usb', { mountPoint: device.mount_point })
+    if (result) {
+      addLog('info', result)
+      // Refresh device list to show is_pioneer = true
+      const devices = await tauriInvoke<{ mount_point: string; name: string; is_pioneer: boolean }[]>('get_usb_devices')
+      if (devices) {
+        setUsbDevices(prev => devices.map(d => ({
+          ...d,
+          status: prev.find(p => p.mount_point === d.mount_point)?.status ?? 'idle',
+        })))
+      }
+    } else {
+      addLog('error', `Format failed for ${device.name}`)
+    }
+  }
+
+  const pickDownloadFolder = async () => {
+    const path = await tauriDialog()
+    if (path) setNewSyncPath(path)
+  }
+
+  const addDownloadSync = () => {
+    if (!newSyncPath || !newSyncPlaylistId) return
+    const playlist = playlists.find(p => p.id === newSyncPlaylistId)
+    if (!playlist) return
+    const sync: DownloadSync = {
+      id: Math.random().toString(36).slice(2),
+      path: newSyncPath,
+      playlist_id: newSyncPlaylistId,
+      playlist_name: playlist.name,
+    }
+    setDownloadSyncs(prev => [...prev, sync])
+    setShowAddDownload(false)
+    setNewSyncPath(null)
+    setNewSyncPlaylistId('')
+    addLog('info', `Added download sync: ${playlist.name} → ${newSyncPath}`)
+  }
+
+  const removeDownloadSync = (id: string) => {
+    setDownloadSyncs(prev => prev.filter(s => s.id !== id))
+  }
+
+  const runDownloadSync = async (sync: DownloadSync) => {
+    const token = localStorage.getItem('xkc_access_token') || ''
+    addLog('download', `Syncing "${sync.playlist_name}" → ${sync.path}...`)
+    const result = await tauriInvoke<string>('sync_playlist_to_folder', {
+      folder: sync.path,
+      playlistId: sync.playlist_id,
+      serverUrl,
+      token,
+    })
+    if (result) {
+      addLog('download', result)
+    } else {
+      addLog('error', `Download sync failed: ${sync.playlist_name}`)
+    }
   }
 
   const s: Record<string, any> = {
     root: { height: '100%', display: 'flex', flexDirection: 'column', background: '#111', overflow: 'hidden' },
     tabs: { display: 'flex', borderBottom: '1px solid #1f1f1f', flexShrink: 0 },
     tab: (active: boolean): React.CSSProperties => ({
-      padding: '6px 14px', fontSize: 11, fontWeight: 600, color: active ? '#e5e5e5' : '#525252',
+      padding: '6px 12px', fontSize: 11, fontWeight: 600, color: active ? '#e5e5e5' : '#525252',
       background: 'none', border: 'none', cursor: 'pointer', textTransform: 'uppercase',
       letterSpacing: 0.5, borderBottom: active ? '2px solid #3b82f6' : '2px solid transparent',
+      whiteSpace: 'nowrap',
     }),
     body: { flex: 1, overflow: 'auto', padding: '10px 14px' },
     row: { display: 'flex', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #1a1a1a', gap: 8 },
     path: { flex: 1, fontSize: 12, color: '#a3a3a3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-    badge: (color: string): React.CSSProperties => ({ fontSize: 10, padding: '2px 6px', borderRadius: 10, background: color + '22', color }),
-    btn: { fontSize: 11, padding: '3px 8px', borderRadius: 4, border: '1px solid #2a2a2a', background: 'none', color: '#737373', cursor: 'pointer' },
+    badge: (color: string): React.CSSProperties => ({ fontSize: 10, padding: '2px 6px', borderRadius: 10, background: color + '22', color, flexShrink: 0 }),
+    btn: { fontSize: 11, padding: '3px 8px', borderRadius: 4, border: '1px solid #2a2a2a', background: 'none', color: '#737373', cursor: 'pointer', flexShrink: 0 },
+    blueBtn: { fontSize: 11, padding: '3px 8px', borderRadius: 4, border: '1px solid #3b82f6', background: 'none', color: '#3b82f6', cursor: 'pointer', flexShrink: 0 },
     addBtn: { fontSize: 11, padding: '4px 10px', borderRadius: 4, border: '1px solid #3b82f6', background: 'none', color: '#3b82f6', cursor: 'pointer', marginTop: 8 },
     toggle: (on: boolean): React.CSSProperties => ({
       width: 28, height: 16, borderRadius: 8, background: on ? '#3b82f6' : '#2a2a2a',
@@ -141,10 +245,13 @@ export default function LocalPanel({ serverUrl }: Props) {
     }),
     empty: { color: '#525252', fontSize: 12, padding: '12px 0' },
     logEntry: (type: string): React.CSSProperties => ({
-      fontSize: 11, padding: '3px 0', color: type === 'error' ? '#f87171' : type === 'usb_sync' ? '#60a5fa' : '#a3a3a3',
+      fontSize: 11, padding: '3px 0', color: type === 'error' ? '#f87171' : type === 'usb_sync' ? '#60a5fa' : type === 'download' ? '#34d399' : '#a3a3a3',
       borderBottom: '1px solid #1a1a1a',
     }),
-    logTime: { color: '#525252', marginRight: 8, fontFamily: 'monospace' },
+    logTime: { color: '#525252', marginRight: 8, fontFamily: 'monospace' as const },
+    form: { background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6, padding: 10, marginTop: 8 },
+    formRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
+    select: { flex: 1, background: '#0f0f0f', border: '1px solid #2a2a2a', borderRadius: 4, padding: '4px 8px', color: '#e5e5e5', fontSize: 12 },
   }
 
   const statusColor = (s: string) => s === 'watching' ? '#22c55e' : s === 'syncing' ? '#3b82f6' : s === 'error' ? '#ef4444' : '#525252'
@@ -153,29 +260,28 @@ export default function LocalPanel({ serverUrl }: Props) {
     <div style={s.root}>
       <div style={s.tabs}>
         <button style={s.tab(activeSection === 'folders')} onClick={() => setActiveSection('folders')}>
-          Watched Folders ({folders.length})
+          Watch ({folders.length})
+        </button>
+        <button style={s.tab(activeSection === 'downloads')} onClick={() => setActiveSection('downloads')}>
+          Download ({downloadSyncs.length})
         </button>
         <button style={s.tab(activeSection === 'usb')} onClick={() => setActiveSection('usb')}>
-          USB Devices ({usbDevices.length})
+          USB ({usbDevices.length})
         </button>
         <button style={s.tab(activeSection === 'log')} onClick={() => setActiveSection('log')}>
-          Sync Log
+          Log
         </button>
       </div>
 
       <div style={s.body}>
         {activeSection === 'folders' && (
           <>
-            {folders.length === 0 && <div style={s.empty}>No folders watched. Add a folder to auto-import new tracks.</div>}
+            {folders.length === 0 && <div style={s.empty}>No folders watched. Add a folder to auto-import new audio files.</div>}
             {folders.map(f => (
               <div key={f.path} style={s.row}>
                 <span style={s.badge(statusColor(f.status))}>{f.status}</span>
                 <span style={s.path} title={f.path}>{f.path}</span>
-                <button
-                  style={s.toggle(f.autoSync)}
-                  onClick={() => toggleAutoSync(f.path)}
-                  title={f.autoSync ? 'Auto-sync on' : 'Auto-sync off'}
-                />
+                <button style={s.toggle(f.autoSync)} onClick={() => toggleAutoSync(f.path)} title={f.autoSync ? 'Auto-sync on' : 'Auto-sync off'} />
                 <button style={s.btn} onClick={() => removeFolder(f.path)}>Remove</button>
               </div>
             ))}
@@ -183,23 +289,81 @@ export default function LocalPanel({ serverUrl }: Props) {
           </>
         )}
 
+        {activeSection === 'downloads' && (
+          <>
+            {downloadSyncs.length === 0 && !showAddDownload && (
+              <div style={s.empty}>No download syncs. Add one to mirror a playlist into a local folder.</div>
+            )}
+            {downloadSyncs.map(sync => (
+              <div key={sync.id} style={s.row}>
+                <span style={s.badge('#34d399')}>↓</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: '#e5e5e5', fontWeight: 500 }}>{sync.playlist_name}</div>
+                  <div style={{ fontSize: 11, color: '#525252', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sync.path}</div>
+                </div>
+                <button style={s.blueBtn} onClick={() => runDownloadSync(sync)}>Sync</button>
+                <button style={s.btn} onClick={() => removeDownloadSync(sync.id)}>✕</button>
+              </div>
+            ))}
+            {showAddDownload ? (
+              <div style={s.form}>
+                <div style={s.formRow}>
+                  <button style={s.blueBtn} onClick={pickDownloadFolder}>
+                    {newSyncPath ? '📁 ' + newSyncPath.split('/').pop() : 'Choose Folder'}
+                  </button>
+                </div>
+                <div style={s.formRow}>
+                  <select
+                    style={s.select}
+                    value={newSyncPlaylistId}
+                    onChange={e => setNewSyncPlaylistId(e.target.value)}
+                  >
+                    <option value="">Select playlist...</option>
+                    {playlists.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    style={{ ...s.blueBtn, padding: '4px 12px' }}
+                    onClick={addDownloadSync}
+                    disabled={!newSyncPath || !newSyncPlaylistId}
+                  >
+                    Add
+                  </button>
+                  <button style={{ ...s.btn, padding: '4px 12px' }} onClick={() => { setShowAddDownload(false); setNewSyncPath(null); setNewSyncPlaylistId('') }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button style={s.addBtn} onClick={() => setShowAddDownload(true)}>+ Add Download Sync</button>
+            )}
+          </>
+        )}
+
         {activeSection === 'usb' && (
           <>
             {usbDevices.length === 0 && (
-              <div style={s.empty}>No Pioneer USB drives detected. Insert a formatted USB drive.</div>
+              <div style={s.empty}>No USB drives detected. Insert a drive to get started.</div>
             )}
             {usbDevices.map(d => (
-              <div key={d.mountPoint} style={s.row}>
-                <span style={s.badge('#3b82f6')}>USB</span>
-                <span style={s.path} title={d.mountPoint}>{d.name}</span>
-                <span style={{ ...s.badge(statusColor(d.status)), fontSize: 10 }}>{d.status}</span>
-                <button
-                  style={{ ...s.btn, borderColor: '#3b82f6', color: '#3b82f6' }}
-                  onClick={() => syncUsb(d)}
-                  disabled={d.status === 'syncing'}
-                >
-                  {d.status === 'syncing' ? 'Syncing...' : 'Sync Now'}
-                </button>
+              <div key={d.mount_point} style={s.row}>
+                <span style={s.badge(d.is_pioneer ? '#3b82f6' : '#a3a3a3')}>{d.is_pioneer ? 'Pioneer' : 'USB'}</span>
+                <span style={s.path} title={d.mount_point}>{d.name}</span>
+                {d.status === 'syncing' && <span style={s.badge('#3b82f6')}>syncing...</span>}
+                {d.is_pioneer ? (
+                  <button
+                    style={{ ...s.blueBtn, opacity: d.status === 'syncing' ? 0.5 : 1 }}
+                    onClick={() => syncUsb(d)}
+                    disabled={d.status === 'syncing'}
+                  >
+                    {d.status === 'syncing' ? 'Syncing...' : 'Sync'}
+                  </button>
+                ) : (
+                  <button style={s.btn} onClick={() => formatUsb(d)}>Format as Pioneer</button>
+                )}
               </div>
             ))}
           </>

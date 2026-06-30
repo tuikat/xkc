@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 use notify::{Watcher, RecursiveMode, Event, EventKind};
-use serde_json::json;
+use serde_json::{json, Value};
 
 const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4a", "ogg", "opus", "aac"];
 
@@ -19,91 +19,81 @@ impl Default for WatcherState {
 
 // ── USB detection ──────────────────────────────────────────────────────────────
 
-fn detect_usb_devices() -> Vec<String> {
-    let mut found = Vec::new();
+fn make_device(path: &Path) -> Option<Value> {
+    if !path.is_dir() { return None; }
+    let name = path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string());
+    if name.is_empty() || name == "." { return None; }
+    let mount_point = path.to_string_lossy().to_string();
+    let is_pioneer = path.join("PIONEER").join("rekordbox").exists();
+    Some(json!({ "mount_point": mount_point, "name": name, "is_pioneer": is_pioneer }))
+}
 
-    #[cfg(target_os = "linux")]
-    {
-        // Check /proc/mounts
-        if let Ok(contents) = std::fs::read_to_string("/proc/mounts") {
-            for line in contents.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let mount = parts[1];
-                    if !mount.starts_with("/sys")
-                        && !mount.starts_with("/proc")
-                        && mount != "/"
-                        && mount != "/boot"
-                    {
-                        let pioneer = format!("{}/PIONEER/rekordbox", mount);
-                        if Path::new(&pioneer).exists() && !found.contains(&mount.to_string()) {
-                            found.push(mount.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        // Also check common removable media directories
-        for base in &["/media", "/mnt", "/run/media"] {
-            if let Ok(entries) = std::fs::read_dir(base) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    scan_for_pioneer(&p, &mut found, 2);
-                }
-            }
-        }
-    }
+fn detect_usb_devices() -> Vec<Value> {
+    let mut found: Vec<Value> = Vec::new();
 
     #[cfg(target_os = "macos")]
     {
         if let Ok(entries) = std::fs::read_dir("/Volumes") {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if p.join("PIONEER").join("rekordbox").exists() {
-                    found.push(p.to_string_lossy().to_string());
-                }
+                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                // Skip the macOS boot volume
+                if name == "Macintosh HD" || name.is_empty() { continue; }
+                if let Some(dev) = make_device(&p) { found.push(dev); }
             }
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        for letter in b'A'..=b'Z' {
+        for letter in b'C'..=b'Z' {
             let drive = format!("{}:\\", letter as char);
-            if Path::new(&drive).join("PIONEER").join("rekordbox").exists() {
-                found.push(drive);
+            let p = Path::new(&drive);
+            if p.exists() {
+                if let Some(dev) = make_device(p) { found.push(dev); }
             }
         }
     }
 
-    found.dedup();
+    #[cfg(target_os = "linux")]
+    {
+        for base in &["/media", "/mnt", "/run/media"] {
+            if let Ok(top) = std::fs::read_dir(base) {
+                for entry in top.flatten() {
+                    let p = entry.path();
+                    if !p.is_dir() { continue; }
+                    // /run/media/<user>/<drive> — descend one level
+                    let children_count = std::fs::read_dir(&p).map(|r| r.count()).unwrap_or(0);
+                    // If first child looks like a mountpoint (not just files), try children
+                    let mut found_children = false;
+                    if let Ok(children) = std::fs::read_dir(&p) {
+                        for child in children.flatten() {
+                            if child.path().is_dir() {
+                                if let Some(dev) = make_device(&child.path()) {
+                                    found.push(dev);
+                                    found_children = true;
+                                }
+                            }
+                        }
+                    }
+                    if !found_children && children_count == 0 {
+                        // Directly a mountpoint (e.g. /mnt/usb)
+                        if let Some(dev) = make_device(&p) { found.push(dev); }
+                    }
+                }
+            }
+        }
+    }
+
     found
-}
-
-fn scan_for_pioneer(path: &Path, found: &mut Vec<String>, depth: u32) {
-    if depth == 0 || !path.is_dir() {
-        return;
-    }
-    if path.join("PIONEER").join("rekordbox").exists() {
-        let s = path.to_string_lossy().to_string();
-        if !found.contains(&s) {
-            found.push(s);
-        }
-        return;
-    }
-    if depth > 1 {
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                scan_for_pioneer(&entry.path(), found, depth - 1);
-            }
-        }
-    }
 }
 
 // ── Tauri commands ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn get_usb_devices() -> Vec<String> {
+fn get_usb_devices() -> Vec<Value> {
     detect_usb_devices()
 }
 
@@ -148,7 +138,6 @@ async fn start_folder_watch(
         watchers.insert(path.clone(), w);
     }
 
-    // Spawn background task to handle events
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
@@ -175,7 +164,7 @@ fn stop_folder_watch(path: String, state: State<'_, WatcherState>) -> Result<(),
 }
 
 #[tauri::command]
-fn get_watched_folders_status(state: State<'_, WatcherState>) -> serde_json::Value {
+fn get_watched_folders_status(state: State<'_, WatcherState>) -> Value {
     let watchers = state.watchers.lock().unwrap();
     let paths: Vec<&String> = watchers.keys().collect();
     json!({ "watching": paths })
@@ -188,47 +177,166 @@ async fn sync_usb(
     token: String,
     playlist_ids: Vec<String>,
 ) -> Result<String, String> {
-    let ids = playlist_ids.join(",");
-    let url = format!("{}/api/sync/pioneer-export?playlist_ids={}", server_url.trim_end_matches('/'), ids);
-
+    let base = server_url.trim_end_matches('/');
     let client = reqwest::Client::new();
+
+    // 1. Create export job
+    let body = json!({ "playlist_ids": playlist_ids, "format": "pioneer" });
     let res = client
-        .get(&url)
+        .post(format!("{}/api/export/", base))
         .header("Cookie", format!("access_token={}", token))
+        .header("Content-Type", "application/json")
+        .json(&body)
         .send()
         .await
         .map_err(|e| e.to_string())?;
 
     if !res.status().is_success() {
-        return Err(format!("Server returned {}", res.status()));
+        return Err(format!("Export request failed: {}", res.status()));
     }
 
-    // The response is a zip. Save it to a temp file and extract to USB.
-    let bytes = res.bytes().await.map_err(|e| e.to_string())?;
+    let resp: Value = res.json().await.map_err(|e| e.to_string())?;
+    let job_id = resp["job_id"].as_str().ok_or("No job_id in response")?.to_string();
+
+    // 2. Poll for completion
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        let status_res = client
+            .get(format!("{}/api/export/{}", base, job_id))
+            .header("Cookie", format!("access_token={}", token))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status: Value = status_res.json().await.map_err(|e| e.to_string())?;
+        match status["status"].as_str().unwrap_or("unknown") {
+            "complete" => break,
+            "failed" => return Err(format!("Export failed: {}", status["error"].as_str().unwrap_or("unknown"))),
+            _ => continue,
+        }
+    }
+
+    // 3. Download zip
+    let zip_res = client
+        .get(format!("{}/api/export/{}/download", base, job_id))
+        .header("Cookie", format!("access_token={}", token))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !zip_res.status().is_success() {
+        return Err(format!("Download failed: {}", zip_res.status()));
+    }
+
+    let bytes = zip_res.bytes().await.map_err(|e| e.to_string())?;
     let tmp_path = std::env::temp_dir().join("xkc_usb_export.zip");
     std::fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
 
-    // Extract zip to USB mount point
+    // 4. Extract to USB mount point
     let file = std::fs::File::open(&tmp_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let mount = Path::new(&mount_point);
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let outpath = mount.join(file.name());
-        if file.name().ends_with('/') {
+        let mut zf = archive.by_index(i).map_err(|e| e.to_string())?;
+        let outpath = mount.join(zf.name());
+        if zf.name().ends_with('/') {
             std::fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
         } else {
             if let Some(parent) = outpath.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             let mut outfile = std::fs::File::create(&outpath).map_err(|e| e.to_string())?;
-            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+            std::io::copy(&mut zf, &mut outfile).map_err(|e| e.to_string())?;
         }
     }
 
     std::fs::remove_file(&tmp_path).ok();
     Ok(format!("Sync complete to {}", mount_point))
+}
+
+#[tauri::command]
+fn format_usb(mount_point: String) -> Result<String, String> {
+    let mount = Path::new(&mount_point);
+    let pioneer_dir = mount.join("PIONEER").join("rekordbox");
+    let contents_dir = mount.join("Contents");
+
+    std::fs::create_dir_all(&pioneer_dir).map_err(|e| format!("Cannot create PIONEER dir: {}", e))?;
+    std::fs::create_dir_all(&contents_dir).map_err(|e| format!("Cannot create Contents dir: {}", e))?;
+
+    let xml = r#"<?xml version='1.0' encoding='UTF-8'?>
+<DJ_PLAYLISTS Version="1.0.0">
+  <PRODUCT Name="rekordbox" Version="6.8.5" Company="Pioneer DJ"/>
+  <COLLECTION Entries="0"/>
+  <PLAYLISTS><NODE Name="ROOT" Type="0" Count="0"/></PLAYLISTS>
+</DJ_PLAYLISTS>"#;
+
+    let xml_path = pioneer_dir.join("rekordbox.xml");
+    std::fs::write(&xml_path, xml).map_err(|e| format!("Cannot write rekordbox.xml: {}", e))?;
+
+    Ok(format!("Formatted {} as Pioneer USB", mount_point))
+}
+
+#[tauri::command]
+async fn sync_playlist_to_folder(
+    folder: String,
+    playlist_id: String,
+    server_url: String,
+    token: String,
+) -> Result<String, String> {
+    let base = server_url.trim_end_matches('/');
+    let client = reqwest::Client::new();
+
+    let tracks_res = client
+        .get(format!("{}/api/tracks/?playlist_id={}", base, playlist_id))
+        .header("Cookie", format!("access_token={}", token))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !tracks_res.status().is_success() {
+        return Err(format!("Failed to get tracks: {}", tracks_res.status()));
+    }
+
+    let tracks: Vec<Value> = tracks_res.json().await.map_err(|e| e.to_string())?;
+    let total = tracks.len();
+    let folder_path = Path::new(&folder);
+    std::fs::create_dir_all(folder_path).map_err(|e| e.to_string())?;
+
+    let mut synced = 0usize;
+    for track in &tracks {
+        let id = match track["id"].as_str() {
+            Some(id) => id,
+            None => continue,
+        };
+        let artist = track["artist"].as_str().unwrap_or("Unknown Artist");
+        let title = track["title"].as_str().unwrap_or("Unknown Title");
+        let fmt = track["file_format"].as_str().unwrap_or("mp3");
+        let raw_name = format!("{} - {}.{}", artist, title, fmt);
+        let safe_name: String = raw_name.chars()
+            .map(|c| if c.is_alphanumeric() || " \\-_.".contains(c) { c } else { '_' })
+            .collect();
+
+        let dest = folder_path.join(&safe_name);
+        if dest.exists() {
+            synced += 1;
+            continue;
+        }
+
+        let stream_res = client
+            .get(format!("{}/api/tracks/{}/stream", base, id))
+            .header("Cookie", format!("access_token={}", token))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if stream_res.status().is_success() {
+            let bytes = stream_res.bytes().await.map_err(|e| e.to_string())?;
+            std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+            synced += 1;
+        }
+    }
+
+    Ok(format!("Synced {}/{} tracks to {}", synced, total, folder))
 }
 
 // ── HTTP upload helper ─────────────────────────────────────────────────────────
@@ -282,9 +390,10 @@ pub fn run() {
             stop_folder_watch,
             get_watched_folders_status,
             sync_usb,
+            format_usb,
+            sync_playlist_to_folder,
         ])
         .setup(|app| {
-            // System tray
             use tauri::tray::{TrayIconBuilder, TrayIconEvent};
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
 
