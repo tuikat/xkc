@@ -242,15 +242,28 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
         <div className="p-3 border-b border-xkc-border">
           <div className="text-xs text-xkc-muted uppercase tracking-wider mb-2 px-1">Shared</div>
           {(playlists as Playlist[]).filter(p => p.is_shared).map((pl) => (
-            <SidebarItem
+            <div
               key={pl.id}
-              label={pl.name}
-              count={pl.track_count}
-              active={selectedPlaylistId === pl.id}
-              onClick={() => onPlaylistSelect(pl.id)}
-              dotColor={hexColor(pl.cover_color)}
-              className="w-full"
-            />
+              className={cn('rounded-lg transition-colors', dragOverPlaylist === pl.id && 'bg-xkc-accent/20 ring-1 ring-xkc-accent')}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverPlaylist(pl.id) }}
+              onDragLeave={() => setDragOverPlaylist(null)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragOverPlaylist(null)
+                const raw = e.dataTransfer.getData('trackIds')
+                if (raw) addTracksToPlaylist.mutate({ plId: pl.id, trackIds: JSON.parse(raw) as string[] })
+              }}
+            >
+              <SidebarItem
+                label={pl.name}
+                count={pl.track_count}
+                active={selectedPlaylistId === pl.id}
+                onClick={() => onPlaylistSelect(pl.id)}
+                onContextMenu={(e) => { e.preventDefault(); setPlCtxMenu({ x: e.clientX, y: e.clientY, pl }) }}
+                dotColor={hexColor(pl.cover_color)}
+                className="w-full"
+              />
+            </div>
           ))}
         </div>
       )}

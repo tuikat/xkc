@@ -117,10 +117,25 @@ class Beat(Base):
     track = relationship("Track", back_populates="beats")
 
 
+class UserTrackMeta(Base):
+    """Per-user overrides for shared track fields: rating, color, play_count, genre, comment."""
+    __tablename__ = "user_track_meta"
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    track_id = Column(String(36), ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True)
+    rating = Column(Integer, nullable=True)
+    color = Column(Integer, nullable=True)
+    play_count = Column(Integer, default=0)
+    genre = Column(String(512), nullable=True)
+    comment = Column(Text, nullable=True)
+    user = relationship("User")
+    track = relationship("Track")
+
+
 class Cue(Base):
     __tablename__ = "cues"
     id = Column(String(36), primary_key=True, default=new_uuid)
     track_id = Column(String(36), ForeignKey("tracks.id", ondelete="CASCADE"))
+
     position_ms = Column(Integer, nullable=False)
     type = Column(String(16), default="hot")  # hot/memory/loop_in/loop_out
     color = Column(Integer, default=0xCC0000)

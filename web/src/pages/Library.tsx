@@ -256,10 +256,12 @@ export default function Library() {
                 onSelectTrack={setSelectedTrackId}
                 selectedTrackId={selectedTrackId}
                 tagGroups={tagGroups}
+                playlists={playlists}
                 isSharedPlaylist={!!(selectedPlaylistId && playlists.find(p => p.id === selectedPlaylistId)?.is_shared)}
-                onAddToPlaylist={(trackId) => {
-                  const pl = playlists[0]
-                  if (pl) api.playlists.addTracks(pl.id, [trackId])
+                onAddToPlaylist={(trackId, playlistId) => {
+                  api.playlists.addTracks(playlistId, [trackId]).then(() =>
+                    qc.invalidateQueries({ queryKey: ['tracks'] })
+                  )
                 }}
                 onDeleteTrack={(id) => deleteTrack.mutate(id)}
                 onReanalyze={(id) => reanalyze.mutate(id)}

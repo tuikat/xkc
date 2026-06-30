@@ -127,6 +127,7 @@ export default function TrackTable({
   const { filters, setFilters, playerTrack, playerPlaying, setPlayerTrack } = useStore()
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [showPlaylistPicker, setShowPlaylistPicker] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null)
   const [sortCol, setSortCol] = useState<string>('date_added')
@@ -218,7 +219,7 @@ export default function TrackTable({
     setContextMenu({ x: e.clientX, y: e.clientY, trackIds: ids })
   }, [selectedIds])
 
-  function closeAll() { setContextMenu(null); setColPickerOpen(false); setActiveFilterCol(null) }
+  function closeAll() { setContextMenu(null); setColPickerOpen(false); setActiveFilterCol(null); setShowPlaylistPicker(false) }
 
   // ---- Cell renderers ----
   function renderCell(col: ColDef, track: Track, isPlaying: boolean, canPlay: boolean) {
@@ -589,11 +590,28 @@ export default function TrackTable({
           <div className="px-3 py-1 text-xs text-xkc-muted border-b border-xkc-border mb-1">
             {contextMenu.trackIds.length} track{contextMenu.trackIds.length > 1 ? 's' : ''} selected
           </div>
-          {onAddToPlaylist && (
-            <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
-              onClick={() => { contextMenu.trackIds.forEach(id => onAddToPlaylist(id)); setContextMenu(null) }}>
-              Add to Playlist
-            </button>
+          {onAddToPlaylist && playlists.length > 0 && (
+            <div className="relative">
+              <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text flex items-center justify-between"
+                onClick={() => setShowPlaylistPicker(v => !v)}>
+                Add to Playlist <span className="text-xkc-muted text-xs">▶</span>
+              </button>
+              {showPlaylistPicker && (
+                <div className="absolute left-full top-0 ml-1 bg-xkc-surface border border-xkc-border rounded-lg shadow-xl py-1 min-w-[160px] z-50">
+                  {playlists.map(pl => (
+                    <button key={pl.id}
+                      className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text text-sm truncate"
+                      onClick={() => {
+                        contextMenu.trackIds.forEach(id => onAddToPlaylist(id, pl.id))
+                        setShowPlaylistPicker(false)
+                        setContextMenu(null)
+                      }}>
+                      {pl.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           {onReanalyze && contextMenu.trackIds.length === 1 && (
             <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
