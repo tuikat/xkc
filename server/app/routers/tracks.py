@@ -15,6 +15,7 @@ import io
 import asyncio
 import json
 import os
+import logging
 
 from app.database import get_db
 from app.schemas import TrackOut, TrackUpdate, CueCreate, CueOut
@@ -23,6 +24,7 @@ from app.config import get_settings
 from app import models
 
 router = APIRouter(prefix="/tracks", tags=["tracks"])
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".mp3", ".flac", ".wav", ".aiff", ".aif", ".m4a", ".ogg", ".opus"}
 
@@ -243,7 +245,17 @@ def upload_track(
             detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if file.size is not None and file.size > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds the {settings.max_upload_mb}MB upload limit",
+        )
+
+    logger.info(f"Upload received: {file.filename} (user={current_user.username})")
+
     from app.services.audio import compute_file_hash as _hash_file
+    from app.services.audio import executor as analysis_executor
 
     track_id = str(uuid.uuid4())
     tracks_dir = Path(settings.data_dir) / "tracks"
@@ -254,11 +266,19 @@ def upload_track(
     with tmp_dest.open("wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    if tmp_dest.stat().st_size > max_bytes:
+        tmp_dest.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds the {settings.max_upload_mb}MB upload limit",
+        )
+
     # --- Dedup: check hash against existing tracks ---
     file_hash = _hash_file(str(tmp_dest))
     existing = db.query(models.Track).filter(models.Track.file_hash == file_hash).first()
     if existing:
         tmp_dest.unlink(missing_ok=True)
+        logger.info(f"Upload duplicate: {file.filename} matches existing track {existing.id}")
         row = {c.name: getattr(existing, c.name) for c in existing.__table__.columns}
         row["duplicate"] = True
         return row
@@ -316,20 +336,41 @@ def upload_track(
     db.add(track)
     db.commit()
     db.refresh(track)
+    logger.info(f"Upload saved: {file.filename} -> track {track_id}, queued for analysis")
 
-    import concurrent.futures
     from app.services.metadata import enrich_track as _enrich
     from app.models import AppSetting as _AS
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    background_tasks.add_task(executor.submit, _run_analysis, track_id, str(dest))
+    background_tasks.add_task(analysis_executor.submit, _run_analysis, track_id, str(dest))
 
     enrich_enabled = db.query(_AS).filter(_AS.key == 'enrich_on_import').first()
     if enrich_enabled is None or enrich_enabled.value != 'false':
-        background_tasks.add_task(executor.submit, _enrich, track, db)
+        background_tasks.add_task(analysis_executor.submit, _enrich, track, db)
 
     row = {c.name: getattr(track, c.name) for c in track.__table__.columns}
     row["duplicate"] = False
     return row
+
+
+@router.post("/status")
+def get_tracks_status(
+    body: dict,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(get_current_user),
+):
+    """Batched lookup of analysis state for many tracks at once — used by the
+    client to poll progress for a whole bulk-import batch (e.g. thousands of
+    tracks) with one request instead of one websocket/request per track."""
+    ids = body.get("ids") or []
+    if not ids or not isinstance(ids, list):
+        return []
+    ids = ids[:1000]
+    rows = db.query(
+        models.Track.id, models.Track.analysis_state, models.Track.analysis_error,
+    ).filter(models.Track.id.in_(ids)).all()
+    return [
+        {"id": r.id, "analysis_state": r.analysis_state, "analysis_error": r.analysis_error}
+        for r in rows
+    ]
 
 
 @router.get("/{track_id}")
@@ -612,9 +653,9 @@ def reanalyze_track(
         raise HTTPException(status_code=404, detail="Track not found")
     track.analysis_state = "pending"
     db.commit()
-    import concurrent.futures
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    background_tasks.add_task(executor.submit, _run_analysis, track_id, track.file_path)
+    from app.services.audio import executor as analysis_executor
+    background_tasks.add_task(analysis_executor.submit, _run_analysis, track_id, track.file_path)
+    logger.info(f"Reanalysis queued for track {track_id}")
     return {"status": "reanalysis queued"}
 
 

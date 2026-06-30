@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional
 import uuid
 import shutil
+import logging
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_permission
@@ -12,6 +13,7 @@ from app.config import get_settings
 from app import models
 
 router = APIRouter(prefix="/sync", tags=["sync"])
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".mp3", ".flac", ".wav", ".aiff", ".aif", ".m4a", ".ogg", ".opus"}
 
@@ -55,10 +57,9 @@ async def batch_upload(
 ):
     settings = get_settings()
     from app.routers.tracks import extract_tags, extract_artwork, _run_analysis
-    import concurrent.futures
+    from app.services.audio import executor
 
     results = []
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=settings.analysis_workers)
 
     for file in files:
         ext = Path(file.filename).suffix.lower()
@@ -113,6 +114,7 @@ async def batch_upload(
         )
         db.add(track)
         db.commit()
+        logger.info(f"Batch upload saved: {file.filename} -> track {track_id}, queued for analysis")
 
         background_tasks.add_task(executor.submit, _run_analysis, track_id, str(dest))
         results.append({"filename": file.filename, "status": "uploaded", "track_id": track_id})

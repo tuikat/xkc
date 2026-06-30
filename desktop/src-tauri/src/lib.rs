@@ -369,7 +369,22 @@ async fn sync_playlist_to_folder(
 // ── HTTP upload helper ─────────────────────────────────────────────────────────
 
 async fn upload_file(path: &Path, server_url: &str, token: &str) -> Result<(), String> {
-    let file_bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+    // Staged logging mirrors the web upload pipeline (preparing/reading -> uploading ->
+    // saved) so desktop folder-watch behaves consistently with the browser import flow.
+    // Reading a file that's a cloud-storage placeholder (iCloud Drive/OneDrive) can
+    // block here for a while as the OS materialises it — log before and after so a
+    // stall is visible in the desktop log instead of looking hung.
+    log::info!("Reading file: {:?}", path);
+    let read_started = std::time::Instant::now();
+    let file_bytes = tokio::fs::read(path).await.map_err(|e| {
+        log::warn!("Failed to read {:?}: {}", path, e);
+        e.to_string()
+    })?;
+    let read_elapsed = read_started.elapsed();
+    if read_elapsed.as_secs() >= 2 {
+        log::info!("Read {:?} ({} bytes) after {:.1}s — possibly a cloud-synced file that needed to download", path, file_bytes.len(), read_elapsed.as_secs_f32());
+    }
+
     let filename = path.file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "track".to_string());
@@ -380,6 +395,7 @@ async fn upload_file(path: &Path, server_url: &str, token: &str) -> Result<(), S
         .map_err(|e| e.to_string())?;
     let form = reqwest::multipart::Form::new().part("file", part);
 
+    log::info!("Uploading: {:?}", path);
     let url = format!("{}/api/tracks/upload", server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let res = client
@@ -388,10 +404,13 @@ async fn upload_file(path: &Path, server_url: &str, token: &str) -> Result<(), S
         .multipart(form)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::warn!("Upload network error for {:?}: {}", path, e);
+            e.to_string()
+        })?;
 
     if res.status().is_success() {
-        log::info!("Uploaded: {:?}", path);
+        log::info!("Saved: {:?} (server queued it for analysis)", path);
     } else {
         log::warn!("Upload failed for {:?}: {}", path, res.status());
     }

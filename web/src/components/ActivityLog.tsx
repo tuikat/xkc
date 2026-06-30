@@ -138,30 +138,47 @@ export default function ActivityLog() {
                 <div className="px-4 py-2 text-xs font-medium text-xkc-muted uppercase tracking-wide bg-xkc-bg/50 border-b border-xkc-border">
                   Upload history ({log.length})
                 </div>
-                {log.map((entry) => (
-                  <div key={entry.id} className="px-4 py-2.5 border-b border-xkc-border/50 last:border-b-0 flex items-start gap-2">
-                    {entry.status === 'complete' && <CheckCircle size={13} className="text-green-400 flex-shrink-0 mt-0.5" />}
-                    {entry.status === 'error' && <XCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />}
-                    {entry.status === 'uploading' && <Loader size={13} className="text-xkc-accent flex-shrink-0 mt-0.5 animate-spin" />}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs text-xkc-text truncate">{entry.name}</div>
-                      {entry.detail && (
-                        <div className={`text-xs mt-0.5 break-words ${entry.status === 'error' ? 'text-red-400/80' : 'text-yellow-400/80'}`}>{entry.detail}</div>
-                      )}
-                      <div className="text-[10px] text-xkc-muted mt-0.5">
-                        {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                {log.map((entry) => {
+                  const stageLabel: Record<string, string> = {
+                    preparing: 'Preparing',
+                    uploading: typeof entry.pct === 'number' ? `Uploading ${entry.pct}%` : 'Uploading',
+                    saved: 'Saved',
+                    analyzing: 'Indexing',
+                    complete: 'Done',
+                    duplicate: 'Duplicate',
+                    error: 'Failed',
+                  }
+                  const label = (entry.stage && stageLabel[entry.stage]) || entry.status
+                  return (
+                    <div key={entry.id} className="px-4 py-2.5 border-b border-xkc-border/50 last:border-b-0 flex items-start gap-2">
+                      {entry.status === 'complete' && <CheckCircle size={13} className="text-green-400 flex-shrink-0 mt-0.5" />}
+                      {entry.status === 'error' && <XCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />}
+                      {entry.status === 'uploading' && <Loader size={13} className="text-xkc-accent flex-shrink-0 mt-0.5 animate-spin" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-xkc-text truncate">{entry.name}</div>
+                        {entry.detail && (
+                          <div className={`text-xs mt-0.5 break-words ${entry.status === 'error' ? 'text-red-400/80' : 'text-yellow-400/80'}`}>{entry.detail}</div>
+                        )}
+                        {entry.stage === 'uploading' && typeof entry.pct === 'number' && (
+                          <div className="h-1 mt-1.5 rounded-full bg-xkc-bg overflow-hidden">
+                            <div className="h-full bg-xkc-accent transition-all" style={{ width: `${entry.pct}%` }} />
+                          </div>
+                        )}
+                        <div className="text-[10px] text-xkc-muted mt-0.5">
+                          {new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </div>
                       </div>
+                      <span className={cn(
+                        'text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 whitespace-nowrap',
+                        entry.status === 'complete' && 'bg-green-900/30 text-green-400',
+                        entry.status === 'error' && 'bg-red-900/30 text-red-400',
+                        entry.status === 'uploading' && 'bg-xkc-accent/10 text-xkc-accent',
+                      )}>
+                        {label}
+                      </span>
                     </div>
-                    <span className={cn(
-                      'text-[10px] px-1.5 py-0.5 rounded flex-shrink-0',
-                      entry.status === 'complete' && 'bg-green-900/30 text-green-400',
-                      entry.status === 'error' && 'bg-red-900/30 text-red-400',
-                      entry.status === 'uploading' && 'bg-xkc-accent/10 text-xkc-accent',
-                    )}>
-                      {entry.status}
-                    </span>
-                  </div>
-                ))}
+                  )
+                })}
               </section>
             )}
           </div>

@@ -9,10 +9,21 @@ interface UploadItem {
   error?: string
 }
 
+export type UploadStage =
+  | 'preparing'   // about to send; if this lingers, the file may be slow to read (e.g. cloud-synced placeholder)
+  | 'uploading'   // bytes in flight, see pct
+  | 'saved'       // server has the file, hashed it, queued it for background analysis
+  | 'analyzing'   // server is indexing (BPM/key/waveform)
+  | 'complete'
+  | 'duplicate'
+  | 'error'
+
 export interface LogEntry {
   id: string
   name: string
   status: 'uploading' | 'complete' | 'error'
+  stage?: UploadStage
+  pct?: number
   detail?: string
   ts: number
 }

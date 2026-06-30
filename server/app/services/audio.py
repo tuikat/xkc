@@ -10,7 +10,20 @@ from typing import Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
-executor = ThreadPoolExecutor(max_workers=2)
+
+# Single shared, bounded pool for all background work spawned from upload/reanalyze/
+# batch-upload routes (analysis + metadata enrichment). Routes used to each create
+# their own throwaway ThreadPoolExecutor per request, which meant a burst of uploads
+# (e.g. importing a 3000-track playlist) spawned thousands of concurrent analysis
+# threads instead of respecting XKC_ANALYSIS_WORKERS. Import-time settings read is
+# fine here since this pool size isn't expected to change without a restart.
+def _make_executor() -> ThreadPoolExecutor:
+    from app.config import get_settings
+    workers = max(1, get_settings().analysis_workers)
+    return ThreadPoolExecutor(max_workers=workers)
+
+
+executor = _make_executor()
 
 
 def compute_file_hash(filepath: str) -> str:
@@ -23,16 +36,24 @@ def compute_file_hash(filepath: str) -> str:
 
 def analyze_track_background(track_id: str, filepath: str, data_dir: str, db_url: str):
     """Run in thread pool. Creates its own DB session."""
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, event
     from sqlalchemy.orm import sessionmaker
     from app.models import Track, Beat
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def _set_pragma(dbapi_conn, _):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()
+
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
         track = db.query(Track).filter(Track.id == track_id).first()
         if not track:
             return
+        logger.info(f"Analysis started for track {track_id} ({Path(filepath).name})")
         track.analysis_state = "analyzing"
         db.commit()
 
@@ -85,6 +106,7 @@ def analyze_track_background(track_id: str, filepath: str, data_dir: str, db_url
         )
         db.add(beat)
         db.commit()
+        logger.info(f"Analysis complete for track {track_id}: bpm={track.bpm} key={key_camelot}")
 
         # Generate ANLZ files
         try:

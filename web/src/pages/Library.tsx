@@ -8,6 +8,7 @@ import TrackTable from '../components/TrackTable'
 import TrackDetail from '../components/TrackDetail'
 import UploadZone from '../components/UploadZone'
 import ActivityLog from '../components/ActivityLog'
+import { enqueueUpload } from '../lib/uploadQueue'
 import Player from '../components/Player'
 import { Search, Upload, Settings, Users, LogOut, Download, ChevronDown, X } from 'lucide-react'
 import InviteInbox from '../components/InviteInbox'
@@ -47,7 +48,7 @@ export default function Library() {
   const qc = useQueryClient()
   const {
     user, searchQuery, setSearchQuery, selectedPlaylistId, setSelectedPlaylistId,
-    selectedTrackId, setSelectedTrackId, filters, setFilters, addLog, updateLog,
+    selectedTrackId, setSelectedTrackId, filters, setFilters,
   } = useStore()
 
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
@@ -126,29 +127,13 @@ export default function Library() {
   }
 
   function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files) {
-      const { addToQueue, updateQueueItem } = useStore.getState()
-      Array.from(e.target.files).forEach(async (file) => {
-        const qid = addToQueue(file)
-        updateQueueItem(qid, { status: 'uploading' })
-        addLog({ id: qid, name: file.name, status: 'uploading', ts: Date.now() })
-        try {
-          const result = await api.tracks.uploadTrack(file, (pct) => updateQueueItem(qid, { progress: pct }))
-          if (result?.duplicate) {
-            updateQueueItem(qid, { status: 'complete', progress: 100 })
-            updateLog(qid, { status: 'complete', detail: 'Already in library (skipped)' })
-          } else {
-            updateQueueItem(qid, { status: 'complete', progress: 100 })
-            updateLog(qid, { status: 'complete' })
-            qc.invalidateQueries({ queryKey: ['tracks'] })
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Upload failed'
-          updateQueueItem(qid, { status: 'error', error: msg })
-          updateLog(qid, { status: 'error', detail: msg })
-        }
-      })
+    if (e.target.files?.length) {
+      // Bounded-concurrency shared pipeline (see lib/uploadQueue.ts) — this used to
+      // fire every selected file's upload at once with no cap, which is what made
+      // large imports (e.g. a 3000-track playlist) overwhelm the browser and fail.
+      enqueueUpload(e.target.files, () => qc.invalidateQueries({ queryKey: ['tracks'] }))
     }
+    e.target.value = ''
   }
 
   return (

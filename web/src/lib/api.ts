@@ -226,6 +226,11 @@ export const api = {
     getGenres: () => req<string[]>('/api/tracks/genres'),
     updateBeats: (id: string, data: { offset_ms?: number; beat_positions_ms?: number[] }) =>
       req<{ beat_positions_ms: number[] }>(`/api/tracks/${id}/beats`, { method: 'PATCH', body: JSON.stringify(data) }),
+    getTrackStatus: (ids: string[]) =>
+      req<{ id: string; analysis_state: string; analysis_error: string | null }[]>('/api/tracks/status', {
+        method: 'POST',
+        body: JSON.stringify({ ids }),
+      }),
     getStreamUrl: (id: string) => `/api/tracks/${id}/stream`,
     getWaveform: (id: string) =>
       req<{ overview: number[]; detail: number[]; beat_times_ms: number[] }>(`/api/tracks/${id}/waveform`),

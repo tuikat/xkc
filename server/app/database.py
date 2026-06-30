@@ -25,6 +25,10 @@ def set_sqlite_pragma(dbapi_conn, _):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
+    # Without this, concurrent writers (e.g. many simultaneous uploads each
+    # committing a new track row) fail immediately with "database is locked"
+    # instead of waiting briefly for the other writer to finish.
+    cursor.execute("PRAGMA busy_timeout=30000")
     cursor.close()
 
 
