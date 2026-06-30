@@ -12,7 +12,7 @@ interface UsbDevice {
   name: string
   is_pioneer: boolean
   status: 'idle' | 'syncing'
-  playlistIds?: string[]
+  selectedPlaylistIds: string[] | null  // null = all playlists
 }
 
 interface DownloadSync {
@@ -67,6 +67,7 @@ export default function LocalPanel({ serverUrl }: Props) {
   })
   const [syncLog, setSyncLog] = useState<SyncLogEntry[]>([])
   const [activeSection, setActiveSection] = useState<'folders' | 'usb' | 'downloads' | 'log'>('folders')
+  const [expandedUsb, setExpandedUsb] = useState<string | null>(null)
 
   // For "Add Download Sync" form
   const [showAddDownload, setShowAddDownload] = useState(false)
@@ -101,7 +102,7 @@ export default function LocalPanel({ serverUrl }: Props) {
           return {
             ...d,
             status: existing?.status ?? 'idle',
-            playlistIds: existing?.playlistIds,
+            selectedPlaylistIds: existing?.selectedPlaylistIds ?? null,
           }
         }))
       }
@@ -111,9 +112,9 @@ export default function LocalPanel({ serverUrl }: Props) {
     return () => clearInterval(interval)
   }, [])
 
-  // Fetch playlists when Add Download Sync is opened
+  // Fetch playlists when USB tab is active or Add Download Sync is opened
   useEffect(() => {
-    if (!showAddDownload) return
+    if (activeSection !== 'usb' && !showAddDownload) return
     const token = localStorage.getItem('xkc_access_token') || ''
     fetch(`${serverUrl}/api/playlists/`, {
       headers: { Cookie: `access_token=${token}` },
@@ -122,7 +123,7 @@ export default function LocalPanel({ serverUrl }: Props) {
       .then(r => r.ok ? r.json() : [])
       .then((data: ServerPlaylist[]) => setPlaylists(data))
       .catch(() => setPlaylists([]))
-  }, [showAddDownload, serverUrl])
+  }, [activeSection, showAddDownload, serverUrl])
 
   const addFolder = async () => {
     const path = await tauriDialog()
@@ -147,13 +148,14 @@ export default function LocalPanel({ serverUrl }: Props) {
 
   const syncUsb = async (device: UsbDevice) => {
     const token = localStorage.getItem('xkc_access_token') || ''
+    const playlistIds = device.selectedPlaylistIds ?? playlists.map(p => p.id)
     setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'syncing' } : d))
-    addLog('usb_sync', `Syncing to ${device.name}...`)
+    addLog('usb_sync', `Syncing ${playlistIds.length === 0 ? 'all' : playlistIds.length} playlist(s) to ${device.name}...`)
     const result = await tauriInvoke<string>('sync_usb', {
       mountPoint: device.mount_point,
       serverUrl,
       token,
-      playlistIds: device.playlistIds || [],
+      playlistIds,
     })
     setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'idle' } : d))
     if (result) {
@@ -163,22 +165,44 @@ export default function LocalPanel({ serverUrl }: Props) {
     }
   }
 
+  const ejectUsb = async (device: UsbDevice) => {
+    const result = await tauriInvoke<string>('eject_usb', { mountPoint: device.mount_point })
+    if (result) {
+      addLog('info', result)
+      setUsbDevices(prev => prev.filter(d => d.mount_point !== device.mount_point))
+      if (expandedUsb === device.mount_point) setExpandedUsb(null)
+    } else {
+      addLog('error', `Failed to eject ${device.name}`)
+    }
+  }
+
   const formatUsb = async (device: UsbDevice) => {
     if (!window.confirm(`Format "${device.name}" as Pioneer USB?\n\nThis will create the Pioneer folder structure. Existing non-Pioneer files will not be affected.`)) return
     const result = await tauriInvoke<string>('format_usb', { mountPoint: device.mount_point })
     if (result) {
       addLog('info', result)
-      // Refresh device list to show is_pioneer = true
       const devices = await tauriInvoke<{ mount_point: string; name: string; is_pioneer: boolean }[]>('get_usb_devices')
       if (devices) {
         setUsbDevices(prev => devices.map(d => ({
           ...d,
           status: prev.find(p => p.mount_point === d.mount_point)?.status ?? 'idle',
+          selectedPlaylistIds: prev.find(p => p.mount_point === d.mount_point)?.selectedPlaylistIds ?? null,
         })))
       }
     } else {
       addLog('error', `Format failed for ${device.name}`)
     }
+  }
+
+  const togglePlaylistForDevice = (mount_point: string, playlistId: string) => {
+    setUsbDevices(prev => prev.map(d => {
+      if (d.mount_point !== mount_point) return d
+      const current = d.selectedPlaylistIds ?? playlists.map(p => p.id)
+      const next = current.includes(playlistId)
+        ? current.filter(id => id !== playlistId)
+        : [...current, playlistId]
+      return { ...d, selectedPlaylistIds: next.length === playlists.length ? null : next }
+    }))
   }
 
   const pickDownloadFolder = async () => {
@@ -252,6 +276,8 @@ export default function LocalPanel({ serverUrl }: Props) {
     form: { background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 6, padding: 10, marginTop: 8 },
     formRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
     select: { flex: 1, background: '#0f0f0f', border: '1px solid #2a2a2a', borderRadius: 4, padding: '4px 8px', color: '#e5e5e5', fontSize: 12 },
+    plConfig: { background: '#0f0f0f', border: '1px solid #1f1f1f', borderRadius: 4, padding: '6px 8px', marginBottom: 4 },
+    plRow: { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 11, color: '#a3a3a3', cursor: 'pointer' },
   }
 
   const statusColor = (s: string) => s === 'watching' ? '#22c55e' : s === 'syncing' ? '#3b82f6' : s === 'error' ? '#ef4444' : '#525252'
@@ -349,20 +375,74 @@ export default function LocalPanel({ serverUrl }: Props) {
               <div style={s.empty}>No USB drives detected. Insert a drive to get started.</div>
             )}
             {usbDevices.map(d => (
-              <div key={d.mount_point} style={s.row}>
-                <span style={s.badge(d.is_pioneer ? '#3b82f6' : '#a3a3a3')}>{d.is_pioneer ? 'Pioneer' : 'USB'}</span>
-                <span style={s.path} title={d.mount_point}>{d.name}</span>
-                {d.status === 'syncing' && <span style={s.badge('#3b82f6')}>syncing...</span>}
-                {d.is_pioneer ? (
-                  <button
-                    style={{ ...s.blueBtn, opacity: d.status === 'syncing' ? 0.5 : 1 }}
-                    onClick={() => syncUsb(d)}
-                    disabled={d.status === 'syncing'}
-                  >
-                    {d.status === 'syncing' ? 'Syncing...' : 'Sync'}
-                  </button>
-                ) : (
-                  <button style={s.btn} onClick={() => formatUsb(d)}>Format as Pioneer</button>
+              <div key={d.mount_point}>
+                <div style={s.row}>
+                  <span style={s.badge(d.is_pioneer ? '#3b82f6' : '#a3a3a3')}>{d.is_pioneer ? 'Pioneer' : 'USB'}</span>
+                  <span style={s.path} title={d.mount_point}>{d.name}</span>
+                  {d.status === 'syncing' && <span style={s.badge('#3b82f6')}>syncing...</span>}
+                  {d.is_pioneer ? (
+                    <>
+                      <button
+                        style={{ ...s.btn, color: expandedUsb === d.mount_point ? '#e5e5e5' : '#737373' }}
+                        onClick={() => setExpandedUsb(expandedUsb === d.mount_point ? null : d.mount_point)}
+                        title="Select playlists"
+                      >
+                        ⚙
+                      </button>
+                      <button
+                        style={{ ...s.blueBtn, opacity: d.status === 'syncing' ? 0.5 : 1 }}
+                        onClick={() => syncUsb(d)}
+                        disabled={d.status === 'syncing'}
+                      >
+                        {d.status === 'syncing' ? 'Syncing...' : 'Sync'}
+                      </button>
+                    </>
+                  ) : (
+                    <button style={s.btn} onClick={() => formatUsb(d)}>Format as Pioneer</button>
+                  )}
+                  <button style={s.btn} onClick={() => ejectUsb(d)} title="Safely eject">⏏</button>
+                </div>
+
+                {/* Playlist picker for this device */}
+                {expandedUsb === d.mount_point && d.is_pioneer && (
+                  <div style={{ ...s.plConfig, marginLeft: 8, marginBottom: 4 }}>
+                    <div style={{ fontSize: 10, color: '#525252', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Playlists to sync
+                    </div>
+                    {/* All playlists option */}
+                    <label style={s.plRow}>
+                      <input
+                        type="checkbox"
+                        checked={d.selectedPlaylistIds === null}
+                        onChange={() => setUsbDevices(prev => prev.map(dev =>
+                          dev.mount_point === d.mount_point
+                            ? { ...dev, selectedPlaylistIds: null }
+                            : dev
+                        ))}
+                        style={{ accentColor: '#3b82f6' }}
+                      />
+                      <span style={{ color: '#e5e5e5', fontWeight: 500 }}>All Playlists</span>
+                    </label>
+                    {/* Individual playlists */}
+                    {playlists.length === 0 && (
+                      <div style={{ fontSize: 11, color: '#525252', padding: '4px 0' }}>Loading playlists...</div>
+                    )}
+                    {playlists.map(pl => {
+                      const selected = d.selectedPlaylistIds === null || d.selectedPlaylistIds.includes(pl.id)
+                      return (
+                        <label key={pl.id} style={{ ...s.plRow, opacity: d.selectedPlaylistIds === null ? 0.4 : 1 }}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={d.selectedPlaylistIds === null}
+                            onChange={() => togglePlaylistForDevice(d.mount_point, pl.id)}
+                            style={{ accentColor: '#3b82f6' }}
+                          />
+                          <span>{pl.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
             ))}

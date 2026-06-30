@@ -27,8 +27,9 @@ export default function MainLayout({ serverUrl, accessToken, onDisconnect }: Pro
     panelWrap: { height: PANEL_H, flexShrink: 0, borderTop: '1px solid #1f1f1f' },
   }
 
-  // Navigate iframe through desktop-login to set auth cookie, then land on /
-  const iframeSrc = `${serverUrl}/api/auth/desktop-login?token=${encodeURIComponent(accessToken)}`
+  // Load the web app with desktop_token param; the SPA fetches /api/auth/desktop-init
+  // (same-origin) to set the auth cookie, bypassing WKWebView third-party cookie blocking.
+  const iframeSrc = `${serverUrl}/?desktop_token=${encodeURIComponent(accessToken)}`
 
   return (
     <div style={s.root}>

@@ -255,6 +255,33 @@ async fn sync_usb(
 }
 
 #[tauri::command]
+fn eject_usb(mount_point: String) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("diskutil")
+            .args(["eject", &mount_point])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if output.status.success() {
+            return Ok(format!("Ejected {}", mount_point));
+        } else {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("umount").arg(&mount_point).output();
+        return Ok(format!("Unmounted {}", mount_point));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        return Ok(format!("Eject {}: use system tray to safely remove hardware", mount_point));
+    }
+    #[allow(unreachable_code)]
+    Err("Eject not supported on this platform".to_string())
+}
+
+#[tauri::command]
 fn format_usb(mount_point: String) -> Result<String, String> {
     let mount = Path::new(&mount_point);
     let pioneer_dir = mount.join("PIONEER").join("rekordbox");
@@ -390,6 +417,7 @@ pub fn run() {
             stop_folder_watch,
             get_watched_folders_status,
             sync_usb,
+            eject_usb,
             format_usb,
             sync_playlist_to_folder,
         ])

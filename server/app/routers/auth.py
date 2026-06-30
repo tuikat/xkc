@@ -113,3 +113,21 @@ def desktop_login(token: str = "", db: Session = Depends(get_db)):
             path="/",
         )
     return resp
+
+
+@router.get("/desktop-init")
+def desktop_init(token: str = "", response: Response = None, db: Session = Depends(get_db)):
+    """Called by the web SPA's JS when inside the Tauri desktop app.
+    Sets the auth cookie via a same-origin fetch, bypassing WKWebView ITP restrictions."""
+    user = get_user_from_token(token, db) if token else None
+    if user and response is not None:
+        response.set_cookie(
+            key=ACCESS_TOKEN_COOKIE,
+            value=token,
+            httponly=True,
+            samesite="lax",
+            max_age=COOKIE_MAX_AGE,
+            path="/",
+        )
+        return {"ok": True}
+    return {"ok": False}
