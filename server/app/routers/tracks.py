@@ -229,7 +229,7 @@ def search_tracks(
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
-async def upload_track(
+def upload_track(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
