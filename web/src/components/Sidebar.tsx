@@ -186,7 +186,7 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
           </form>
         )}
 
-        {playlists.map((pl) => (
+        {(playlists as Playlist[]).filter(p => !p.is_shared).map((pl) => (
           <div
             key={pl.id}
             className={cn('rounded-lg transition-colors', dragOverPlaylist === pl.id && 'bg-xkc-accent/20 ring-1 ring-xkc-accent')}
@@ -227,10 +227,28 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
           </div>
         ))}
 
-        {playlists.length === 0 && !addingPlaylist && (
+        {(playlists as Playlist[]).filter(p => !p.is_shared).length === 0 && !addingPlaylist && (
           <div className="text-xs text-xkc-muted px-1">No playlists yet</div>
         )}
       </div>
+
+      {/* Shared Playlists */}
+      {(playlists as Playlist[]).some(p => p.is_shared) && (
+        <div className="p-3 border-b border-xkc-border">
+          <div className="text-xs text-xkc-muted uppercase tracking-wider mb-2 px-1">Shared</div>
+          {(playlists as Playlist[]).filter(p => p.is_shared).map((pl) => (
+            <SidebarItem
+              key={pl.id}
+              label={pl.name}
+              count={pl.track_count}
+              active={selectedPlaylistId === pl.id}
+              onClick={() => onPlaylistSelect(pl.id)}
+              dotColor={hexColor(pl.cover_color)}
+              className="w-full"
+            />
+          ))}
+        </div>
+      )}
 
       {/* Playlist right-click context menu */}
       {plCtxMenu && (

@@ -5,12 +5,15 @@ and SoundCloud via yt-dlp (DJ/underground music with genre tags).
 Only overwrites fields that are NULL/empty. Skips if match confidence is low.
 """
 import difflib
+import io
 import json
 import logging
 import subprocess
 import time
+from pathlib import Path
 
 import requests
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from app import models
@@ -64,6 +67,44 @@ def _mb_search(title: str, artist: str) -> dict | None:
     return None
 
 
+def _fetch_itunes_artwork(title: str, artist: str, track_id: str, data_dir: str) -> str | None:
+    """Search iTunes for artwork, download, save to /data/artwork/{track_id}.jpg."""
+    try:
+        resp = requests.get(
+            'https://itunes.apple.com/search',
+            params={'term': f'{artist} {title}', 'entity': 'song', 'limit': 5, 'media': 'music'},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        results = resp.json().get('results', [])
+        # Find best title match
+        best = None
+        best_score = 0.0
+        for r in results:
+            score = (_sim(title, r.get('trackName', '')) + _sim(artist, r.get('artistName', ''))) / 2
+            if score > best_score:
+                best_score = score
+                best = r
+        if not best or best_score < 0.65:
+            return None
+        art_url = best.get('artworkUrl100', '').replace('100x100', '600x600')
+        if not art_url:
+            return None
+        img_resp = requests.get(art_url, timeout=10)
+        if img_resp.status_code != 200:
+            return None
+        art_dir = Path(data_dir) / 'artwork'
+        art_dir.mkdir(parents=True, exist_ok=True)
+        art_path = art_dir / f'{track_id}.jpg'
+        img = Image.open(io.BytesIO(img_resp.content)).convert('RGB')
+        img.save(str(art_path), 'JPEG', quality=90)
+        return str(art_path)
+    except Exception as e:
+        logger.debug(f'iTunes artwork error: {e}')
+        return None
+
+
 def _sc_search(title: str, artist: str) -> dict | None:
     query = f'{artist} - {title}'
     try:
@@ -93,9 +134,9 @@ def _sc_search(title: str, artist: str) -> dict | None:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-def enrich_track(track: models.Track, db: Session) -> bool:
+def enrich_track(track: models.Track, db: Session, data_dir: str = '/data') -> bool:
     """
-    Attempt to fill empty metadata fields from MusicBrainz and SoundCloud.
+    Attempt to fill empty metadata fields from MusicBrainz, SoundCloud, and iTunes (artwork).
     Returns True if any field was updated.
     Never touches: rating, color, play_count, cues, file_path, source_type.
     """
@@ -163,6 +204,13 @@ def enrich_track(track: models.Track, db: Session) -> bool:
                     track.genre = ', '.join(sc_tags[:3])
                     updated = True
 
+    # --- iTunes: artwork (always try if no artwork yet) ---
+    if not track.artwork_path or not Path(track.artwork_path).exists():
+        art_path = _fetch_itunes_artwork(track.title, track.artist, track.id, data_dir)
+        if art_path:
+            track.artwork_path = art_path
+            updated = True
+
     if updated:
         try:
             db.commit()
@@ -175,7 +223,7 @@ def enrich_track(track: models.Track, db: Session) -> bool:
     return updated
 
 
-def enrich_batch(track_ids: list[str], db_url: str) -> None:
+def enrich_batch(track_ids: list[str], db_url: str, data_dir: str = '/data') -> None:
     """Enrich a list of tracks by ID — runs in a background thread with its own DB session."""
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
@@ -186,6 +234,6 @@ def enrich_batch(track_ids: list[str], db_url: str) -> None:
         for tid in track_ids:
             track = db.query(models.Track).filter(models.Track.id == tid).first()
             if track:
-                enrich_track(track, db)
+                enrich_track(track, db, data_dir)
     finally:
         db.close()

@@ -216,7 +216,7 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
 
     # Enrich metadata in background thread — doesn't block sync completion
     if imported_ids and _should_enrich(db):
-        threading.Thread(target=enrich_batch, args=(imported_ids, db_url), daemon=True).start()
+        threading.Thread(target=enrich_batch, args=(imported_ids, db_url, data_dir), daemon=True).start()
 
 
 def _sync_ytdlp(source, log, db, tracks_dir: Path, data_dir: str, db_url: str, mirror_playlist):

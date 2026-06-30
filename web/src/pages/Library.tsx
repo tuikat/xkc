@@ -38,6 +38,7 @@ export default function Library() {
       key_camelot: filters.keyCamelot,
       genre: filters.genre,
       artist: filters.artist,
+      analysis_state: filters.analysis_state,
     }),
   })
 
@@ -194,6 +195,18 @@ export default function Library() {
               {/* Track count + active filter chips */}
               <div className="px-3 py-1.5 border-b border-xkc-border text-xs text-xkc-muted bg-xkc-surface/50 flex-shrink-0 flex items-center gap-2 flex-wrap">
                 <span>{isLoading ? 'Loading…' : `${tracks.length} tracks`}</span>
+                <button
+                  onClick={() => setFilters({ ...filters, analysis_state: filters.analysis_state === 'failed' ? undefined : 'failed' })}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-0.5 rounded-full border transition-colors',
+                    filters.analysis_state === 'failed'
+                      ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                      : 'border-xkc-border text-xkc-muted hover:text-red-400 hover:border-red-500/30'
+                  )}
+                  title="Show only tracks with audio errors"
+                >
+                  ✗ Errors
+                </button>
                 {filters.artist && (
                   <button onClick={() => setFilters({ ...filters, artist: undefined })}
                     className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30">
@@ -216,6 +229,12 @@ export default function Library() {
                   <button onClick={() => setFilters({ ...filters, minBpm: undefined, maxBpm: undefined })}
                     className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-xkc-accent/20 text-xkc-accent border border-xkc-accent/30 hover:bg-xkc-accent/30">
                     BPM: {filters.minBpm ?? ''}–{filters.maxBpm ?? ''} <X size={10} />
+                  </button>
+                )}
+                {filters.analysis_state === 'failed' && (
+                  <button onClick={() => setFilters({ ...filters, analysis_state: undefined })}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30">
+                    Errors only <X size={10} />
                   </button>
                 )}
                 {Object.values(filters).some(Boolean) && (

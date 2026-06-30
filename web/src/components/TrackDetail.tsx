@@ -183,15 +183,37 @@ export default function TrackDetail({ trackId, onClose, tagGroups }: TrackDetail
 
   if (!track) return null
 
+  const artworkUrl = track.artwork_path ? `/api/tracks/${track.id}/artwork` : null
+
   return (
     <div className="w-80 flex-shrink-0 border-l border-xkc-border bg-xkc-surface flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-xkc-border flex-shrink-0">
-        <div className="text-sm font-medium text-xkc-text truncate">{track.title || 'Untitled'}</div>
-        <button onClick={onClose} className="text-xkc-muted hover:text-xkc-text ml-2">
-          <X size={16} />
-        </button>
-      </div>
+      {/* Artwork — full width, square, shown when available */}
+      {artworkUrl && (
+        <div className="w-full flex-shrink-0 relative bg-xkc-bg">
+          <img
+            src={artworkUrl}
+            alt={track.title || 'Artwork'}
+            className="w-full aspect-square object-cover"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+          {/* Title overlay at bottom of artwork */}
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 py-2 flex items-end justify-between">
+            <div className="text-sm font-medium text-white truncate pr-2">{track.title || 'Untitled'}</div>
+            <button onClick={onClose} className="text-white/70 hover:text-white flex-shrink-0">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Header — only shown when no artwork */}
+      {!artworkUrl && (
+        <div className="flex items-center justify-between p-3 border-b border-xkc-border flex-shrink-0">
+          <div className="text-sm font-medium text-xkc-text truncate">{track.title || 'Untitled'}</div>
+          <button onClick={onClose} className="text-xkc-muted hover:text-xkc-text ml-2">
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {/* Analysis badge */}

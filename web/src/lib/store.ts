@@ -24,6 +24,7 @@ interface Filters {
   genre?: string
   artist?: string
   tagIds?: string[]
+  analysis_state?: string
 }
 
 interface AppState {
