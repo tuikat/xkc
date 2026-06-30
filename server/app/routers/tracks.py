@@ -268,8 +268,14 @@ async def upload_track(
     db.refresh(track)
 
     import concurrent.futures
+    from app.services.metadata import enrich_track as _enrich
+    from app.models import AppSetting as _AS
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     background_tasks.add_task(executor.submit, _run_analysis, track_id, str(dest))
+
+    enrich_enabled = db.query(_AS).filter(_AS.key == 'enrich_on_import').first()
+    if enrich_enabled is None or enrich_enabled.value != 'false':
+        background_tasks.add_task(executor.submit, _enrich, track, db)
 
     return {c.name: getattr(track, c.name) for c in track.__table__.columns}
 

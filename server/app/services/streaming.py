@@ -10,12 +10,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from app.services.metadata import enrich_batch
+
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.opus', '.ogg', '.wav', '.aiff'}
 
 # Strip ANSI escape codes and carriage returns from terminal output
 _ANSI = re.compile(r'(\x9B|\x1B\[)[0-9:;<=>?]*[ -/]*[@-~]|\x1B[PX^_].*?\x1B\\|\x1B[@-_]|\x07|\r')
+
+
+def _should_enrich(db) -> bool:
+    from app.models import AppSetting
+    row = db.query(AppSetting).filter(AppSetting.key == 'enrich_on_import').first()
+    return row is None or row.value != 'false'
 
 
 def sync_source(source_id: str, db_url: str, data_dir: str, log_id: str):
@@ -187,12 +195,16 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
 
     imported = 0
     skipped_import = 0
+    imported_ids: list[str] = []
     for track_file in new_files:
         result = _import_file(track_file, source, db, data_dir, db_url, mirror_playlist)
         if result == 'imported':
             imported += 1
+            from app.models import Track as _Track
+            t = db.query(_Track).filter_by(file_path=str(track_file)).first()
+            if t:
+                imported_ids.append(t.id)
         else:
-            # Duplicate — delete the spotdl-downloaded file to avoid wasting space
             try:
                 track_file.unlink()
             except Exception:
@@ -201,6 +213,10 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
         log.tracks_downloaded = imported
         log.tracks_skipped = skipped_import
         db.commit()
+
+    # Enrich metadata in background thread — doesn't block sync completion
+    if imported_ids and _should_enrich(db):
+        threading.Thread(target=enrich_batch, args=(imported_ids, db_url), daemon=True).start()
 
 
 def _sync_ytdlp(source, log, db, tracks_dir: Path, data_dir: str, db_url: str, mirror_playlist):

@@ -14,7 +14,7 @@ from app import models
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
-SETTING_KEYS = ["public_url", "max_upload_mb", "analysis_workers", "features_streaming", "features_export"]
+SETTING_KEYS = ["public_url", "max_upload_mb", "analysis_workers", "features_streaming", "features_export", "enrich_on_import"]
 
 
 def _get_db_settings(db: Session) -> dict:
@@ -46,6 +46,7 @@ def get_settings_endpoint(
         "features_streaming": db_settings.get("features_streaming", "true") == "true",
         "features_export": db_settings.get("features_export", "true") == "true",
         "spotify_configured": bool(cfg.spotify_client_id),
+        "enrich_on_import": db_settings.get("enrich_on_import", "true") == "true",
     }
 
 

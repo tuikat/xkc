@@ -310,6 +310,15 @@ function ExportTab() {
 }
 
 function ImportTab() {
+  const qc = useQueryClient()
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get })
+  const enrichEnabled = settings?.enrich_on_import !== false
+
+  const toggleEnrich = useMutation({
+    mutationFn: (val: boolean) => api.settings.update({ enrich_on_import: val }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  })
+
   const [rbFile, setRbFile] = useState<File | null>(null)
   const [rbPreview, setRbPreview] = useState<{ import_id: string; track_count: number; playlists: string[] } | null>(null)
   const [importing, setImporting] = useState(false)
@@ -342,6 +351,29 @@ function ImportTab() {
 
   return (
     <div className="space-y-6">
+      <div className="bg-xkc-surface border border-xkc-border rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-medium text-xkc-text">Auto-enrich metadata on import</div>
+            <div className="text-xs text-xkc-muted mt-0.5">
+              Fills empty fields (year, label, genre, ISRC) from MusicBrainz and SoundCloud.
+              Only fills missing values — never overwrites existing metadata or your ratings.
+            </div>
+          </div>
+          <button
+            onClick={() => toggleEnrich.mutate(!enrichEnabled)}
+            className={cn(
+              'relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200',
+              enrichEnabled ? 'bg-xkc-accent' : 'bg-xkc-border'
+            )}
+          >
+            <span className={cn(
+              'inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform duration-200',
+              enrichEnabled ? 'translate-x-4' : 'translate-x-0'
+            )} />
+          </button>
+        </div>
+      </div>
       <div>
         <h2 className="text-sm font-medium text-xkc-text mb-2">Import from Rekordbox</h2>
         <p className="text-xs text-xkc-muted mb-4">Export your collection from Rekordbox: File → Export Collection in xml format, then upload the .xml file here.</p>
