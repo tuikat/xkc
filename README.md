@@ -6,10 +6,8 @@
 
 <p>
   <img src="https://img.shields.io/badge/status-early%20access-orange?style=flat-square" alt="Status" />
-  <img src="https://img.shields.io/github/v/release/tuikat/xkc?style=flat-square&label=latest" alt="Latest Release" />
   <img src="https://img.shields.io/badge/pioneer-CDJ%20%7C%20XDJ%20compatible-blue?style=flat-square" alt="Pioneer Compatible" />
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square" alt="Platforms" />
-  <img src="https://img.shields.io/github/actions/workflow/status/tuikat/xkc/release.yml?style=flat-square&label=build" alt="Build" />
 </p>
 
 <p>
