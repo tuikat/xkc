@@ -120,6 +120,7 @@ def analyze_track_background(track_id: str, filepath: str, data_dir: str, db_url
                 duration_ms=int(librosa.get_duration(y=y, sr=sr) * 1000),
                 waveform_overview=overview,
                 anlz_dir=str(anlz_dir),
+                file_path=filepath,
             )
             track.anlz_path = str(anlz_dir)
             db.commit()

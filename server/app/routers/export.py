@@ -28,6 +28,7 @@ def _flat_export(job_id: str, playlist_ids: list, db: Session, settings):
     try:
         with _jobs_lock:
             _export_jobs[job_id]["status"] = "running"
+        logger.info(f"Flat export {job_id} started for {len(playlist_ids)} playlist(s)")
 
         export_dir = Path(settings.data_dir) / "exports" / job_id
         export_dir.mkdir(parents=True, exist_ok=True)
@@ -35,6 +36,7 @@ def _flat_export(job_id: str, playlist_ids: list, db: Session, settings):
         playlists = db.query(models.Playlist).filter(models.Playlist.id.in_(playlist_ids)).all()
         total = sum(len(p.tracks) for p in playlists)
         done = 0
+        skipped = 0
 
         for playlist in playlists:
             safe_name = "".join(c if c.isalnum() or c in " -_" else "_" for c in playlist.name)
@@ -42,12 +44,19 @@ def _flat_export(job_id: str, playlist_ids: list, db: Session, settings):
             pl_dir.mkdir(exist_ok=True)
             for pt in sorted(playlist.tracks, key=lambda x: x.position):
                 track = pt.track
-                src = Path(track.file_path)
-                if src.exists():
-                    artist = track.artist or "Unknown Artist"
-                    title = track.title or src.stem
-                    safe = "".join(c if c.isalnum() or c in " -_." else "_" for c in f"{artist} - {title}{src.suffix}")
-                    shutil.copy2(src, pl_dir / safe)
+                try:
+                    src = Path(track.file_path)
+                    if src.exists():
+                        artist = track.artist or "Unknown Artist"
+                        title = track.title or src.stem
+                        safe = "".join(c if c.isalnum() or c in " -_." else "_" for c in f"{artist} - {title}{src.suffix}")
+                        shutil.copy2(src, pl_dir / safe)
+                    else:
+                        logger.warning(f"Flat export {job_id}: audio file missing for track {track.id}, skipping")
+                        skipped += 1
+                except Exception as e:
+                    logger.warning(f"Flat export {job_id}: failed to copy track {track.id}: {e}")
+                    skipped += 1
                 done += 1
                 with _jobs_lock:
                     _export_jobs[job_id]["progress"] = int(done / total * 100) if total else 100
@@ -64,7 +73,9 @@ def _flat_export(job_id: str, playlist_ids: list, db: Session, settings):
             _export_jobs[job_id]["status"] = "complete"
             _export_jobs[job_id]["zip_path"] = str(zip_path)
             _export_jobs[job_id]["progress"] = 100
+        logger.info(f"Flat export {job_id} complete: {total} tracks, {skipped} skipped")
     except Exception as e:
+        logger.exception(f"Flat export {job_id} failed: {e}")
         with _jobs_lock:
             _export_jobs[job_id]["status"] = "failed"
             _export_jobs[job_id]["error"] = str(e)
@@ -74,17 +85,26 @@ def _pioneer_export(job_id: str, playlist_ids: list, db: Session, settings):
     try:
         with _jobs_lock:
             _export_jobs[job_id]["status"] = "running"
+        logger.info(f"Pioneer export {job_id} started for {len(playlist_ids)} playlist(s)")
 
         from app.services.pdb_export import build_usb_export
         from app.database import SessionLocal
+
+        def on_progress(done, total, stage):
+            with _jobs_lock:
+                _export_jobs[job_id]["progress"] = int(done / total * 95) if total else 0
+                _export_jobs[job_id]["stage"] = stage
+
         # Use a fresh DB session (background task — original may be closed)
         with SessionLocal() as bg_db:
-            zip_path = build_usb_export(playlist_ids, bg_db, settings, job_id)
+            zip_path = build_usb_export(playlist_ids, bg_db, settings, job_id, progress_callback=on_progress)
 
         with _jobs_lock:
             _export_jobs[job_id]["status"] = "complete"
             _export_jobs[job_id]["zip_path"] = str(zip_path)
             _export_jobs[job_id]["progress"] = 100
+            _export_jobs[job_id]["stage"] = "complete"
+        logger.info(f"Pioneer export {job_id} complete")
     except Exception as e:
         logger.exception(f"Pioneer export {job_id} failed: {e}")
         with _jobs_lock:
@@ -105,6 +125,7 @@ def create_export(
         _export_jobs[job_id] = {
             "status": "queued",
             "progress": 0,
+            "stage": "queued",
             "zip_path": None,
             "error": None,
             "format": body.format,
@@ -130,6 +151,7 @@ def get_export_status(
         "job_id": job_id,
         "status": job["status"],
         "progress": job["progress"],
+        "stage": job.get("stage"),
         "error": job.get("error"),
         "download_url": f"/api/export/{job_id}/download" if job["status"] == "complete" else None,
     }

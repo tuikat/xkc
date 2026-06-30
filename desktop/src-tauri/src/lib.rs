@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::path::Path;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use notify::{Watcher, RecursiveMode, Event, EventKind};
 use serde_json::{json, Value};
 
@@ -170,8 +170,16 @@ fn get_watched_folders_status(state: State<'_, WatcherState>) -> Value {
     json!({ "watching": paths })
 }
 
+fn emit_sync_progress(app: &AppHandle, mount_point: &str, stage: &str, detail: &str) {
+    log::info!("USB sync [{}]: {} -- {}", mount_point, stage, detail);
+    let _ = app.emit("usb-sync-progress", json!({
+        "mount_point": mount_point, "stage": stage, "detail": detail,
+    }));
+}
+
 #[tauri::command]
 async fn sync_usb(
+    app: AppHandle,
     mount_point: String,
     server_url: String,
     token: String,
@@ -181,6 +189,7 @@ async fn sync_usb(
     let client = reqwest::Client::new();
 
     // 1. Create export job
+    emit_sync_progress(&app, &mount_point, "requesting", "Requesting export from server...");
     let body = json!({ "playlist_ids": playlist_ids, "format": "pioneer" });
     let res = client
         .post(format!("{}/api/export/", base))
@@ -198,7 +207,8 @@ async fn sync_usb(
     let resp: Value = res.json().await.map_err(|e| e.to_string())?;
     let job_id = resp["job_id"].as_str().ok_or("No job_id in response")?.to_string();
 
-    // 2. Poll for completion
+    // 2. Poll for completion, surfacing the server's reported stage/progress
+    // (e.g. "copying tracks", "building database") as it goes.
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         let status_res = client
@@ -208,14 +218,24 @@ async fn sync_usb(
             .await
             .map_err(|e| e.to_string())?;
         let status: Value = status_res.json().await.map_err(|e| e.to_string())?;
+        let stage = status["stage"].as_str().unwrap_or("building");
+        let pct = status["progress"].as_u64().unwrap_or(0);
         match status["status"].as_str().unwrap_or("unknown") {
             "complete" => break,
-            "failed" => return Err(format!("Export failed: {}", status["error"].as_str().unwrap_or("unknown"))),
-            _ => continue,
+            "failed" => {
+                let err = status["error"].as_str().unwrap_or("unknown").to_string();
+                emit_sync_progress(&app, &mount_point, "failed", &err);
+                return Err(format!("Export failed: {}", err));
+            }
+            _ => {
+                emit_sync_progress(&app, &mount_point, "building", &format!("{} ({}%)", stage, pct));
+                continue;
+            }
         }
     }
 
     // 3. Download zip
+    emit_sync_progress(&app, &mount_point, "downloading", "Downloading export from server...");
     let zip_res = client
         .get(format!("{}/api/export/{}/download", base, job_id))
         .header("Authorization", format!("Bearer {}", token))
@@ -228,6 +248,8 @@ async fn sync_usb(
     }
 
     let bytes = zip_res.bytes().await.map_err(|e| e.to_string())?;
+    let mb = bytes.len() as f64 / 1_048_576.0;
+    emit_sync_progress(&app, &mount_point, "downloading", &format!("Downloaded {:.1} MB", mb));
     let tmp_path = std::env::temp_dir().join("xkc_usb_export.zip");
     std::fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
 
@@ -235,8 +257,10 @@ async fn sync_usb(
     let file = std::fs::File::open(&tmp_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let mount = Path::new(&mount_point);
+    let total_files = archive.len();
+    emit_sync_progress(&app, &mount_point, "extracting", &format!("Extracting {} files to USB...", total_files));
 
-    for i in 0..archive.len() {
+    for i in 0..total_files {
         let mut zf = archive.by_index(i).map_err(|e| e.to_string())?;
         let outpath = mount.join(zf.name());
         if zf.name().ends_with('/') {
@@ -245,12 +269,19 @@ async fn sync_usb(
             if let Some(parent) = outpath.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            let mut outfile = std::fs::File::create(&outpath).map_err(|e| e.to_string())?;
-            std::io::copy(&mut zf, &mut outfile).map_err(|e| e.to_string())?;
+            let mut outfile = std::fs::File::create(&outpath)
+                .map_err(|e| format!("Failed to write {} to USB: {}", zf.name(), e))?;
+            std::io::copy(&mut zf, &mut outfile)
+                .map_err(|e| format!("Failed to write {} to USB: {}", zf.name(), e))?;
+        }
+        if total_files > 0 && (i % 50 == 0 || i == total_files - 1) {
+            emit_sync_progress(&app, &mount_point, "extracting",
+                &format!("Extracting file {} of {}", i + 1, total_files));
         }
     }
 
     std::fs::remove_file(&tmp_path).ok();
+    emit_sync_progress(&app, &mount_point, "complete", "Sync complete");
     Ok(format!("Sync complete to {}", mount_point))
 }
 

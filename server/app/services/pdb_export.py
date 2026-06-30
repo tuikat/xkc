@@ -8,6 +8,8 @@ from typing import List
 from lxml import etree
 from sqlalchemy.orm import Session
 
+from app.services import pdb_writer as pdb
+
 logger = logging.getLogger(__name__)
 
 # Pioneer cue colours indexed by sort_order (0-7 = hot cues)
@@ -142,14 +144,113 @@ def _build_rekordbox_xml(tracks_data: list, playlists_data: list) -> bytes:
     return etree.tostring(root, pretty_print=True, xml_declaration=True, encoding='UTF-8')
 
 
+def _build_export_pdb(tracks_data: list, playlists_data: list, artwork_dir: Path) -> bytes:
+    """Build the binary export.pdb database -- the file CDJ/XDJ players read
+    directly for standalone USB playback (not rekordbox.xml)."""
+    w = pdb.PdbWriter()
+
+    artist_ids: dict = {}
+    album_ids: dict = {}
+    genre_ids: dict = {}
+    label_ids: dict = {}
+    key_ids: dict = {}
+    artwork_ids: dict = {}
+
+    def lookup_id(cache: dict, page_type: int, builder, name: str) -> int:
+        if not name:
+            return 0
+        if name not in cache:
+            new_id = len(cache) + 1
+            cache[name] = new_id
+            w.add_row(page_type, builder(new_id, name))
+        return cache[name]
+
+    def artwork_id_for(src_path: str | None) -> int:
+        if not src_path or not Path(src_path).exists():
+            return 0
+        if src_path not in artwork_ids:
+            new_id = len(artwork_ids) + 1
+            artwork_ids[src_path] = new_id
+            artwork_dir.mkdir(parents=True, exist_ok=True)
+            dest = artwork_dir / f"{new_id}.jpg"
+            shutil.copy2(src_path, dest)
+            w.add_row(pdb.PAGE_TYPE_ARTWORK, pdb.build_artwork_row(new_id, f"PIONEER/Artwork/{new_id}.jpg"))
+        return artwork_ids[src_path]
+
+    track_int_id: dict = {}
+    for i, t in enumerate(tracks_data):
+        track_int_id[t['id']] = i + 1
+
+    built_track_ids: set = set()
+    for t in tracks_data:
+        try:
+            artist_id = lookup_id(artist_ids, pdb.PAGE_TYPE_ARTISTS, pdb.build_artist_row, t.get('artist') or '')
+            remixer_id = lookup_id(artist_ids, pdb.PAGE_TYPE_ARTISTS, pdb.build_artist_row, t.get('remixer') or '')
+            album_id = lookup_id(album_ids, pdb.PAGE_TYPE_ALBUMS, lambda i, n: pdb.build_album_row(i, n, artist_id), t.get('album') or '')
+            genre_id = lookup_id(genre_ids, pdb.PAGE_TYPE_GENRES, pdb.build_genre_row, t.get('genre') or '')
+            label_id = lookup_id(label_ids, pdb.PAGE_TYPE_LABELS, pdb.build_label_row, t.get('label') or '')
+            key_id = lookup_id(key_ids, pdb.PAGE_TYPE_KEYS, pdb.build_key_row, t.get('key_musical') or '')
+            artwork_id = artwork_id_for(t.get('artwork_path'))
+
+            ext = Path(t.get('file_path') or '').suffix or f".{(t.get('file_format') or 'mp3')}"
+            track_id = track_int_id[t['id']]
+            row = pdb.build_track_row(
+                track_id,
+                title=t.get('title') or '',
+                artist_id=artist_id, album_id=album_id, genre_id=genre_id,
+                label_id=label_id, key_id=key_id, remixer_id=remixer_id, artwork_id=artwork_id,
+                bitrate=t.get('bitrate') or 0, file_size=t.get('file_size') or 0,
+                tempo_bpm=t.get('bpm') or 0, duration_s=int((t.get('duration_ms') or 0) / 1000),
+                year=t.get('year') or 0, rating=t.get('rating') or 0, play_count=t.get('play_count') or 0,
+                comment=t.get('comment') or '', date_added=(t.get('date_added') or '')[:10],
+                analyze_path=f"PIONEER/USBANLZ/{t['id']}/ANLZ0000.DAT",
+                analyze_date=(t.get('date_added') or '')[:10],
+                # Audio files and ANLZ dirs are written under their original UUID (see
+                # build_usb_export below), not the sequential int id used for PDB row keys.
+                filename=f"{t['id']}{ext}", file_path=f"Contents/{t['id']}{ext}",
+            )
+            w.add_row(pdb.PAGE_TYPE_TRACKS, row)
+            built_track_ids.add(t['id'])
+        except Exception as e:
+            logger.warning(f"Export: failed to build database row for track {t['id']} ({t.get('title')}): {e}")
+
+    for pl_idx, pl in enumerate(playlists_data):
+        playlist_id = pl_idx + 1
+        w.add_row(pdb.PAGE_TYPE_PLAYLIST_TREE, pdb.build_playlist_tree_row(
+            playlist_id, pl['name'], parent_id=0, sort_order=pl_idx,
+        ))
+        entry_idx = 0
+        for t_uuid in pl.get('track_ids', []):
+            if t_uuid not in built_track_ids:
+                continue  # track failed above -- don't reference a row that doesn't exist
+            int_id = track_int_id.get(t_uuid)
+            w.add_row(pdb.PAGE_TYPE_PLAYLIST_ENTRIES,
+                      pdb.build_playlist_entry_row(entry_idx, int_id, playlist_id))
+            entry_idx += 1
+
+    return w.build()
+
+
 def build_usb_export(
     playlist_ids: List[str],
     db: Session,
     settings,
     job_id: str,
+    progress_callback=None,
 ) -> str:
-    """Build Pioneer USB structure as a ZIP and return the ZIP file path."""
+    """Build Pioneer USB structure as a ZIP and return the ZIP file path.
+
+    progress_callback(done: int, total: int, stage: str), if given, is called
+    as work proceeds so a caller can surface live status to the user.
+    """
     from app import models
+
+    def report(done, total, stage):
+        if progress_callback:
+            try:
+                progress_callback(done, total, stage)
+            except Exception:
+                pass
 
     playlists = (
         db.query(models.Playlist)
@@ -198,6 +299,8 @@ def build_usb_export(
                     'comment': track.comment,
                     'file_path': track.file_path,
                     'anlz_path': track.anlz_path,
+                    'artwork_path': track.artwork_path,
+                    'file_size': track.file_size,
                     'cues': cues_raw,
                     'beat_times_ms': beat.beat_positions_ms if beat else [],
                 })
@@ -211,29 +314,49 @@ def build_usb_export(
     for d in [content_dir, pioneer_dir, anlz_dir]:
         d.mkdir(parents=True, exist_ok=True)
 
-    # Write rekordbox.xml (root level + inside PIONEER/rekordbox for older CDJs)
+    # Write rekordbox.xml (root level + inside PIONEER/rekordbox for older CDJs/interop
+    # with other DJ software). NOTE: this is NOT what CDJs read for standalone USB
+    # playback -- see export.pdb below, which is the actual device database format.
     xml_bytes = _build_rekordbox_xml(ordered_tracks, playlists_data)
     (export_dir / "rekordbox.xml").write_bytes(xml_bytes)
     (pioneer_dir / "rekordbox.xml").write_bytes(xml_bytes)
 
-    # Copy audio files and ANLZ data
-    for t in ordered_tracks:
-        src = t.get('file_path') or ''
-        if src and Path(src).exists():
-            ext = Path(src).suffix
-            shutil.copy2(src, content_dir / f"{t['id']}{ext}")
+    # Copy audio files and ANLZ data. A single bad/missing file shouldn't sink
+    # the whole export -- log it, skip it, and keep going.
+    total = len(ordered_tracks)
+    skipped: list = []
+    for i, t in enumerate(ordered_tracks):
+        try:
+            src = t.get('file_path') or ''
+            if src and Path(src).exists():
+                ext = Path(src).suffix
+                shutil.copy2(src, content_dir / f"{t['id']}{ext}")
+            else:
+                logger.warning(f"Export: audio file missing for track {t['id']} ({t.get('title')}), skipping file copy")
 
-        anlz_src = t.get('anlz_path')
-        if anlz_src and Path(anlz_src).exists():
-            anlz_dst = anlz_dir / t['id']
-            anlz_dst.mkdir(parents=True, exist_ok=True)
-            for f in Path(anlz_src).iterdir():
-                if f.is_file():
-                    shutil.copy2(f, anlz_dst / f.name)
-            # Re-generate ANLZ with cue points if we have beat data
-            if t.get('beat_times_ms') or t.get('cues'):
-                _regenerate_anlz_with_cues(t, anlz_dst)
+            anlz_src = t.get('anlz_path')
+            if anlz_src and Path(anlz_src).exists():
+                anlz_dst = anlz_dir / t['id']
+                anlz_dst.mkdir(parents=True, exist_ok=True)
+                for f in Path(anlz_src).iterdir():
+                    if f.is_file():
+                        shutil.copy2(f, anlz_dst / f.name)
+                # Re-generate ANLZ with cue points if we have beat data
+                if t.get('beat_times_ms') or t.get('cues'):
+                    _regenerate_anlz_with_cues(t, anlz_dst)
+        except Exception as e:
+            logger.warning(f"Export: failed to prepare track {t['id']} ({t.get('title')}): {e}")
+            skipped.append(t['id'])
+        report(i + 1, total, "copying tracks")
 
+    # Write export.pdb -- the binary device database CDJ/XDJ players actually
+    # read for standalone USB playback.
+    report(total, total, "building database")
+    artwork_dir = export_dir / "PIONEER" / "Artwork"
+    pdb_bytes = _build_export_pdb(ordered_tracks, playlists_data, artwork_dir)
+    (pioneer_dir / "export.pdb").write_bytes(pdb_bytes)
+
+    report(total, total, "compressing")
     zip_path = Path(settings.data_dir) / "exports" / f"{job_id}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
         for f in export_dir.rglob("*"):
@@ -241,7 +364,10 @@ def build_usb_export(
                 zf.write(f, f.relative_to(export_dir))
 
     shutil.rmtree(export_dir)
-    logger.info(f"Pioneer export complete: {zip_path} ({len(ordered_tracks)} tracks)")
+    if skipped:
+        logger.warning(f"Pioneer export complete with {len(skipped)} skipped track(s): {zip_path} ({total} tracks total)")
+    else:
+        logger.info(f"Pioneer export complete: {zip_path} ({total} tracks)")
     return str(zip_path)
 
 
@@ -260,6 +386,7 @@ def _regenerate_anlz_with_cues(track_data: dict, anlz_dst: Path) -> None:
             duration_ms=int(duration_ms),
             cues=cues,
             anlz_dir=str(anlz_dst),
+            file_path=f"Contents/{track_data['id']}{Path(track_data.get('file_path') or '').suffix}",
         )
     except Exception as e:
         logger.warning(f"ANLZ cue regeneration failed for {track_data['id']}: {e}")

@@ -12,6 +12,7 @@ interface UsbDevice {
   name: string
   is_pioneer: boolean
   status: 'idle' | 'syncing'
+  statusDetail?: string
   selectedPlaylistIds: string[] | null  // null = all playlists
 }
 
@@ -102,6 +103,7 @@ export default function LocalPanel({ serverUrl }: Props) {
           return {
             ...d,
             status: existing?.status ?? 'idle',
+            statusDetail: existing?.statusDetail,
             selectedPlaylistIds: existing?.selectedPlaylistIds ?? null,
           }
         }))
@@ -111,6 +113,33 @@ export default function LocalPanel({ serverUrl }: Props) {
     const interval = setInterval(poll, 5000)
     return () => clearInterval(interval)
   }, [])
+
+  // Live staged progress from the Rust sync_usb command (requesting -> building ->
+  // downloading -> extracting -> complete/failed), shown on the device badge and
+  // logged so it's visible what's actually happening during a long sync.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event')
+        const un = await listen<{ mount_point: string; stage: string; detail: string }>('usb-sync-progress', (event) => {
+          const { mount_point, stage, detail } = event.payload
+          setUsbDevices(prev => prev.map(d =>
+            d.mount_point === mount_point ? { ...d, statusDetail: detail } : d
+          ))
+          if (stage === 'requesting' || stage === 'downloading' || stage === 'complete' || stage === 'failed') {
+            addLog(stage === 'failed' ? 'error' : 'usb_sync', detail)
+          }
+        })
+        if (cancelled) un()
+        else unlisten = un
+      } catch {
+        // not running under Tauri (e.g. plain browser dev) -- no-op
+      }
+    })()
+    return () => { cancelled = true; unlisten?.() }
+  }, [addLog])
 
   // Fetch playlists when USB tab is active or Add Download Sync is opened
   useEffect(() => {
@@ -149,7 +178,7 @@ export default function LocalPanel({ serverUrl }: Props) {
   const syncUsb = async (device: UsbDevice) => {
     const token = localStorage.getItem('xkc_access_token') || ''
     const playlistIds = device.selectedPlaylistIds ?? playlists.map(p => p.id)
-    setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'syncing' } : d))
+    setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'syncing', statusDetail: undefined } : d))
     addLog('usb_sync', `Syncing ${playlistIds.length === 0 ? 'all' : playlistIds.length} playlist(s) to ${device.name}...`)
     const result = await tauriInvoke<string>('sync_usb', {
       mountPoint: device.mount_point,
@@ -157,7 +186,7 @@ export default function LocalPanel({ serverUrl }: Props) {
       token,
       playlistIds,
     })
-    setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'idle' } : d))
+    setUsbDevices(prev => prev.map(d => d.mount_point === device.mount_point ? { ...d, status: 'idle', statusDetail: undefined } : d))
     if (result) {
       addLog('usb_sync', `Done: ${result}`)
     } else {
@@ -379,7 +408,9 @@ export default function LocalPanel({ serverUrl }: Props) {
                 <div style={s.row}>
                   <span style={s.badge(d.is_pioneer ? '#3b82f6' : '#a3a3a3')}>{d.is_pioneer ? 'Pioneer' : 'USB'}</span>
                   <span style={s.path} title={d.mount_point}>{d.name}</span>
-                  {d.status === 'syncing' && <span style={s.badge('#3b82f6')}>syncing...</span>}
+                  {d.status === 'syncing' && (
+                    <span style={s.badge('#3b82f6')} title={d.statusDetail}>{d.statusDetail || 'syncing...'}</span>
+                  )}
                   {d.is_pioneer ? (
                     <>
                       <button
