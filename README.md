@@ -1,4 +1,4 @@
-<div align="center">
+<img width="1447" height="800" alt="image" src="https://github.com/user-attachments/assets/c4db174b-3c80-43de-929d-c5d3fbc0a39a" /><div align="center">
 
 <h1>XKC</h1>
 
@@ -43,9 +43,9 @@ Unlike Rekordbox and similar tools, XKC is not tied to a single laptop. Your ser
 - **Desktop App** - native app for macOS, Windows, and Linux with USB auto-sync and folder watching
 - **Pioneer-ready exports** - full USB packages with rekordbox.xml, beat grids, cue points, and waveforms for all CDJ/XDJ hardware
 
----
+<img width="2872" height="1570" alt="Screenshot 2026-07-01 at 00-39-38 XKC" src="https://github.com/user-attachments/assets/ec130f8c-8f37-457a-baf2-95c935a4e6a1" />
 
-![Uploading image.png…]()
+---
 
 ## Features
 
