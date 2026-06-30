@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" fill="#0d0d0d" rx="6"/>
-  <rect x="13" y="5" width="6" height="22" fill="#3b82f6" rx="1"/>
-  <rect x="5" y="13" width="22" height="6" fill="#3b82f6" rx="1"/>
+  <!-- Dark grey rounded-square background matching the macOS app icon -->
+  <rect width="32" height="32" fill="#111111" rx="7"/>
+  <!-- Blue plus -->
+  <rect x="13.5" y="5.5" width="5" height="21" fill="#4a90d9" rx="1"/>
+  <rect x="5.5" y="13.5" width="21" height="5" fill="#4a90d9" rx="1"/>
 </svg>
