@@ -2,7 +2,7 @@
 
 <h1>XKC</h1>
 
-<p><strong>Self-hosted DJ library management, built for professionals, runs on your hardware.</strong></p>
+<p><strong>Self-hosted DJ music and playlist manager, import direct from Spotify or SoundCloud, collaborate with other DJs, watch folders, and sync a Pioneer-ready USB in seconds from any device, anywhere in the world.</strong></p>
 
 <p>
   <img src="https://img.shields.io/badge/status-early%20access-orange?style=flat-square" alt="Status" />
