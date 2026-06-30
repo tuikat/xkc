@@ -94,6 +94,11 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
     env['TERM'] = 'dumb'
     env['PYTHONUNBUFFERED'] = '1'
 
+    cookie_file = Path(data_dir) / 'youtube_cookies.txt'
+    cookie_args = ['--cookie-file', str(cookie_file)] if cookie_file.exists() else []
+    if not cookie_args:
+        logger.warning("No youtube_cookies.txt found — YouTube downloads will likely fail. Add cookies in Settings → Streaming.")
+
     logger.info(f"Starting spotdl download for {source.source_url}")
     proc = subprocess.Popen(
         [
@@ -101,7 +106,8 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
             '--output', output_tmpl,
             '--format', fmt,
             '--bitrate', bitrate,
-            '--download-threads', '5',  # parallel downloads
+            '--threads', '5',
+            *cookie_args,
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,   # merge stderr so we see all output
@@ -151,17 +157,21 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
     reader.start()
 
     try:
-        proc.wait(timeout=7200)
+        returncode = proc.wait(timeout=7200)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+        returncode = -1
         logger.warning("spotdl timed out after 2 hours — importing whatever was downloaded")
     finally:
         reader.join(timeout=15)
 
-    # Final commit of spotdl counts before we move to the import phase
-    log.tracks_downloaded = dl_count[0]
-    log.tracks_skipped = sk_count[0]
+    if returncode not in (0, -1):
+        raise RuntimeError(f"spotdl exited with code {returncode} — check that all CLI flags are valid")
+
+    # Reset counts before import phase (avoid carrying over parse noise from any error output)
+    log.tracks_downloaded = 0
+    log.tracks_skipped = 0
     db.commit()
 
     # Scan filesystem for new files and import them into our library

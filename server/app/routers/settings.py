@@ -5,6 +5,7 @@ from pathlib import Path
 import zipfile
 import io
 import os
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.dependencies import get_admin_user
@@ -58,6 +59,41 @@ def update_settings(
         if key in SETTING_KEYS:
             _set_db_setting(db, key, str(val))
     return {"detail": "Settings updated"}
+
+
+class CookiesBody(BaseModel):
+    cookies: str
+
+
+@router.get("/youtube-cookies")
+def get_youtube_cookies(
+    _admin=Depends(get_admin_user),
+):
+    cfg = get_settings()
+    cookie_path = Path(cfg.data_dir) / "youtube_cookies.txt"
+    return {"configured": cookie_path.exists()}
+
+
+@router.post("/youtube-cookies")
+def save_youtube_cookies(
+    body: CookiesBody,
+    _admin=Depends(get_admin_user),
+):
+    cfg = get_settings()
+    cookie_path = Path(cfg.data_dir) / "youtube_cookies.txt"
+    cookie_path.write_text(body.cookies.strip())
+    return {"detail": "Cookies saved"}
+
+
+@router.delete("/youtube-cookies")
+def delete_youtube_cookies(
+    _admin=Depends(get_admin_user),
+):
+    cfg = get_settings()
+    cookie_path = Path(cfg.data_dir) / "youtube_cookies.txt"
+    if cookie_path.exists():
+        cookie_path.unlink()
+    return {"detail": "Cookies deleted"}
 
 
 @router.get("/export")

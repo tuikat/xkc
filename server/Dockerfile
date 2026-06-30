@@ -14,7 +14,9 @@ WORKDIR /app
 RUN python -m venv /opt/spotdl-env && \
     /opt/spotdl-env/bin/pip install --no-cache-dir spotdl yt-dlp && \
     ln -sf /opt/spotdl-env/bin/spotdl /usr/local/bin/spotdl && \
-    ln -sf /opt/spotdl-env/bin/yt-dlp /usr/local/bin/yt-dlp
+    ln -sf /opt/spotdl-env/bin/yt-dlp /usr/local/bin/yt-dlp && \
+    spotdl --download-deno && \
+    ln -sf /root/.config/spotdl/deno /usr/local/bin/deno
 
 # Main Python dependencies
 COPY requirements.txt .

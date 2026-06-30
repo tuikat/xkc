@@ -103,6 +103,67 @@ function GeneralTab() {
   )
 }
 
+function YoutubeCookiesSection() {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const { data } = useQuery({ queryKey: ['ytCookies'], queryFn: api.settings.getYoutubeCookies })
+
+  const save = useMutation({
+    mutationFn: () => api.settings.saveYoutubeCookies(draft),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ytCookies'] }); setEditing(false); setDraft('') },
+  })
+  const del = useMutation({
+    mutationFn: api.settings.deleteYoutubeCookies,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ytCookies'] }),
+  })
+
+  return (
+    <div className="bg-xkc-surface border border-xkc-border rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium text-xkc-text">YouTube Cookies</div>
+          <div className="text-xs text-xkc-muted mt-0.5">
+            Required for Spotify sync. Export from YouTube via browser extension
+            <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noreferrer" className="text-xkc-accent ml-1 hover:underline">"Get cookies.txt LOCALLY"</a>
+            , then paste below.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {data?.configured && <span className="text-xs text-green-400 font-medium">Active</span>}
+          {!data?.configured && <span className="text-xs text-yellow-400 font-medium">Not set</span>}
+        </div>
+      </div>
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            className="w-full bg-xkc-bg border border-xkc-border rounded-lg px-3 py-2 text-xs font-mono text-xkc-text focus:outline-none focus:border-xkc-accent resize-none"
+            rows={6}
+            placeholder="Paste cookies.txt content here…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button onClick={() => save.mutate()} disabled={!draft.trim() || save.isPending} className="btn-primary text-xs">
+              {save.isPending ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => setEditing(false)} className="btn-secondary text-xs">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <button onClick={() => setEditing(true)} className="btn-secondary text-xs">
+            {data?.configured ? 'Replace cookies' : 'Add cookies'}
+          </button>
+          {data?.configured && (
+            <button onClick={() => del.mutate()} className="text-xs text-red-400 hover:text-red-300">Remove</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function StreamingTab() {
   const qc = useQueryClient()
   const { addLog, updateLog } = useStore()
@@ -150,6 +211,7 @@ function StreamingTab() {
 
   return (
     <div className="space-y-4">
+      <YoutubeCookiesSection />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-xkc-text">Streaming Sources</h2>
         <button onClick={() => setAdding(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-xkc-accent text-white hover:bg-blue-600">

@@ -292,6 +292,11 @@ export const api = {
     update: (data: Record<string, unknown>) =>
       req<Record<string, unknown>>('/api/settings/', { method: 'PATCH', body: JSON.stringify(data) }),
     exportConfig: () => fetch('/api/settings/export/', { credentials: 'include' }),
+    getYoutubeCookies: () => req<{ configured: boolean }>('/api/settings/youtube-cookies'),
+    saveYoutubeCookies: (cookies: string) =>
+      req<{ detail: string }>('/api/settings/youtube-cookies', { method: 'POST', body: JSON.stringify({ cookies }) }),
+    deleteYoutubeCookies: () =>
+      req<{ detail: string }>('/api/settings/youtube-cookies', { method: 'DELETE' }),
   },
 
   import: {
