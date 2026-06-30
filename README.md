@@ -45,6 +45,8 @@ Unlike Rekordbox and similar tools, XKC is not tied to a single laptop. Your ser
 
 ---
 
+![Uploading image.png…]()
+
 ## Features
 
 ### Library Management
