@@ -1,5 +1,3 @@
-<img width="1447" height="800" alt="image" src="https://github.com/user-attachments/assets/c4db174b-3c80-43de-929d-c5d3fbc0a39a" /><div align="center">
-
 <h1>XKC</h1>
 
 <p><strong>Self-hosted DJ music and playlist manager, import direct from Spotify or SoundCloud, collaborate with other DJs, watch folders, and sync a Pioneer-ready USB in seconds from any device, anywhere in the world.</strong></p>
