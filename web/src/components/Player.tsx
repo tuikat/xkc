@@ -7,6 +7,11 @@ import { hexColor, formatDuration } from '../lib/utils'
 import type { Cue } from '../lib/api'
 
 let _audio: HTMLAudioElement | null = null
+let _pendingAutoPlay = false
+
+/** Call before setPlayerTrack(track) to trigger autoplay once the new track loads. */
+export function requestAutoPlay() { _pendingAutoPlay = true }
+
 export function getAudio() {
   if (!_audio && typeof window !== 'undefined') {
     _audio = new Audio()
@@ -160,6 +165,7 @@ export default function Player() {
   const [playing, setPlaying] = useState(false)
   const [durationMs, setDurationMs] = useState(0)
   const durationMsRef = useRef(0)
+  const wasPlayingRef = useRef(false)  // true when audio was playing before a track switch
 
   // Right-click context menu state
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null)
@@ -209,17 +215,32 @@ export default function Player() {
     if (!playerTrack) return
     const audio = getAudio()
     const url = api.tracks.getStreamUrl(playerTrack.id)
+
     if (!audio.src.endsWith(playerTrack.id + '/stream')) {
+      // Decide autoplay before changing src (wasPlayingRef reflects pre-switch state)
+      const shouldPlay = wasPlayingRef.current || _pendingAutoPlay
+      _pendingAutoPlay = false
+
       audio.src = url
-      audio.load()
       viewStartMsRef.current = 0
       visMsRef.current = 0
       manualScrollRef.current = false
+
+      if (shouldPlay) {
+        const onCanPlay = () => {
+          audio.removeEventListener('canplay', onCanPlay)
+          audio.play().catch(() => {})
+        }
+        audio.addEventListener('canplay', onCanPlay)
+      } else {
+        audio.load()
+      }
     }
+
     const onDuration = () => { setDurationMs(audio.duration * 1000); durationMsRef.current = audio.duration * 1000 }
-    const onPlay = () => { setPlaying(true); setPlayerPlaying(true) }
-    const onPause = () => { setPlaying(false); setPlayerPlaying(false) }
-    const onEnded = () => { setPlaying(false); setPlayerPlaying(false) }
+    const onPlay = () => { setPlaying(true); setPlayerPlaying(true); wasPlayingRef.current = true }
+    const onPause = () => { setPlaying(false); setPlayerPlaying(false); wasPlayingRef.current = false }
+    const onEnded = () => { setPlaying(false); setPlayerPlaying(false); wasPlayingRef.current = false }
     audio.addEventListener('durationchange', onDuration)
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)

@@ -6,7 +6,7 @@ import { formatDuration, formatBpm, hexColor } from '../lib/utils'
 import { Star, Play, Pause, Loader2, ChevronUp, ChevronDown, Settings2, Filter } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useStore } from '../lib/store'
-import { getAudio } from './Player'
+import { getAudio, requestAutoPlay } from './Player'
 
 interface ContextMenuState { x: number; y: number; trackIds: string[] }
 
@@ -15,7 +15,8 @@ interface TrackTableProps {
   onSelectTrack: (id: string) => void
   selectedTrackId: string | null
   tagGroups?: { id: string; name: string; tags: Tag[] }[]
-  onAddToPlaylist?: (trackId: string) => void
+  playlists?: { id: string; name: string }[]
+  onAddToPlaylist?: (trackId: string, playlistId: string) => void
   onDeleteTrack?: (trackId: string) => void
   onReanalyze?: (trackId: string) => void
   isSharedPlaylist?: boolean
@@ -120,7 +121,7 @@ function StarCell({ trackId, rating }: { trackId: string; rating: number }) {
 
 export default function TrackTable({
   tracks, onSelectTrack, selectedTrackId, tagGroups = [],
-  onAddToPlaylist, onDeleteTrack, onReanalyze, isSharedPlaylist = false,
+  playlists = [], onAddToPlaylist, onDeleteTrack, onReanalyze, isSharedPlaylist = false,
 }: TrackTableProps) {
   const qc = useQueryClient()
   const { filters, setFilters, playerTrack, playerPlaying, setPlayerTrack } = useStore()
@@ -199,7 +200,8 @@ export default function TrackTable({
     if (playerTrack?.id === track.id) {
       const a = getAudio(); if (a.paused) a.play(); else a.pause()
     } else {
-      setPlayerTrack(track); setTimeout(() => getAudio().play().catch(() => {}), 100)
+      requestAutoPlay()
+      setPlayerTrack(track)
     }
   }
 
