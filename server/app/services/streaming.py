@@ -182,6 +182,11 @@ def _sync_spotify(source, log, db, tracks_dir: Path, data_dir: str, db_url: str,
         if result == 'imported':
             imported += 1
         else:
+            # Duplicate — delete the spotdl-downloaded file to avoid wasting space
+            try:
+                track_file.unlink()
+            except Exception:
+                pass
             skipped_import += 1
         log.tracks_downloaded = imported
         log.tracks_skipped = skipped_import
