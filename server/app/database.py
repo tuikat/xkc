@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool
 from pathlib import Path
 from .config import get_settings
 import os
@@ -16,7 +16,7 @@ def get_db_url() -> str:
 engine = create_engine(
     get_db_url(),
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+    poolclass=NullPool,
 )
 
 
