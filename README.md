@@ -33,7 +33,7 @@
 
 XKC is a self-hosted DJ library manager. You run it on your own server. Your music, your metadata, your data. No cloud lock-in. No subscription. No sending your library to someone else's servers.
 
-Unlike Rekordbox and similar tools, XKC is not tied to a single laptop. Your server is the permanent source of truth for your library. Lost a USB at a gig? Export a new one from your phone on the way there. Playing somewhere across the world? Log in, pick your playlists, and sync a fresh USB in minutes. Your library is always live, always up to date, always accessible - not frozen on the last machine you happened to open a desktop app on.
+Unlike Rekordbox and similar tools, XKC is not tied to a single laptop. Your server is the permanent source of truth for your library. Lost a USB at a gig? Export a new one from your phone on the way there. Playing somewhere across the world? Log in, pick your playlists, and sync a fresh USB in minutes. Your library is always live, always up to date, always accessible - not frozen on the last machine you happened to open a desktop app on. And unlike every other option, it is entirely open source and hosted by you, on your hardware, under your control.
 
 - **Web UI** - manage your full library from any browser on your network
 - **Desktop App** - native app for macOS, Windows, and Linux with USB auto-sync and folder watching
