@@ -27,7 +27,9 @@ export default function UploadZone({ children }: UploadZoneProps) {
     if (!audioFiles.length) return
 
     let completedSinceRefresh = 0
-    for (const file of audioFiles) {
+    const CONCURRENCY = 5
+
+    const uploadOne = async (file: File) => {
       const queueId = addToQueue(file)
       updateQueueItem(queueId, { status: 'uploading' })
       addLog({ id: queueId, name: file.name, status: 'uploading', ts: Date.now() })
@@ -39,7 +41,6 @@ export default function UploadZone({ children }: UploadZoneProps) {
         } else {
           updateLog(queueId, { status: 'complete' })
           completedSinceRefresh++
-          // Refresh track list every 5 uploads to avoid hammering React with re-renders
           if (completedSinceRefresh >= 5) {
             qc.invalidateQueries({ queryKey: ['tracks'] })
             completedSinceRefresh = 0
@@ -51,7 +52,18 @@ export default function UploadZone({ children }: UploadZoneProps) {
         updateLog(queueId, { status: 'error', detail: msg })
       }
     }
-    // Final refresh after all done
+
+    // Process with a pool of CONCURRENCY slots — as each finishes the next starts,
+    // never loading more than CONCURRENCY files into memory at once
+    const queue = [...audioFiles]
+    const workers = Array.from({ length: CONCURRENCY }, async () => {
+      while (queue.length) {
+        const file = queue.shift()!
+        await uploadOne(file)
+      }
+    })
+    await Promise.all(workers)
+
     if (completedSinceRefresh > 0) qc.invalidateQueries({ queryKey: ['tracks'] })
   }, [addToQueue, updateQueueItem, addLog, updateLog, qc])
 
