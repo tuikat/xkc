@@ -25,6 +25,10 @@
 >
 > XKC is functional and used in real workflows, but features, APIs, and data formats are still evolving. Breaking changes may occur between versions. Back up your library before upgrading.
 
+> **🎛️ Always test before a gig**
+>
+> USB exports and hardware compatibility are improving but not guaranteed. Always test your exported USB on your actual hardware before relying on it at a show. XKC takes no responsibility for playback issues at a gig - verify everything works first.
+
 </div>
 
 ---
