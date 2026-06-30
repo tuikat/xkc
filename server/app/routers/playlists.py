@@ -91,6 +91,8 @@ def get_playlist(
         t = pt.track
         td = {c.name: getattr(t, c.name) for c in t.__table__.columns}
         td["tag_ids"] = [tag.id for tag in t.tags]
+        td["added_by_username"] = pt.added_by_user.username if pt.added_by_user else None
+        td["added_by_id"] = pt.added_by
         d["tracks"].append(td)
     d["track_count"] = len(d["tracks"])
     return d
@@ -108,7 +110,13 @@ def update_playlist(
         raise HTTPException(status_code=404, detail="Playlist not found")
     if not _can_edit(playlist, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
-    for field, val in body.model_dump(exclude_none=True).items():
+    updates = body.model_dump(exclude_none=True)
+    # When sharing, always make it collaborative (edit permission)
+    if updates.get('is_shared') is True:
+        updates['share_permission'] = 'edit'
+    elif updates.get('is_shared') is False:
+        updates['share_permission'] = 'view'
+    for field, val in updates.items():
         setattr(playlist, field, val)
     db.commit()
     db.refresh(playlist)
@@ -156,7 +164,8 @@ def add_tracks_to_playlist(
             continue
         position = body.position if body.position is not None else max_pos + 1 + i
         pt = models.PlaylistTrack(
-            playlist_id=playlist_id, track_id=track_id, position=position
+            playlist_id=playlist_id, track_id=track_id, position=position,
+            added_by=current_user.id,
         )
         db.add(pt)
 

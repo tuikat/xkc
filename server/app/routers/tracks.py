@@ -172,7 +172,7 @@ def search_tracks(
     if playlist_id:
         query = query.join(models.PlaylistTrack, models.PlaylistTrack.track_id == models.Track.id).filter(
             models.PlaylistTrack.playlist_id == playlist_id
-        )
+        ).add_columns(models.PlaylistTrack.added_by, models.PlaylistTrack.position)
     if tag_ids:
         for tid in tag_ids.split(","):
             tid = tid.strip()
@@ -201,11 +201,29 @@ def search_tracks(
     }.get(sort_by, models.Track.date_added.desc())
     query = query.order_by(sort_col)
 
-    tracks = query.offset(offset).limit(limit).all()
+    rows = query.offset(offset).limit(limit).all()
     result = []
-    for t in tracks:
+
+    # Collect user IDs for added_by lookup (only when playlist_id filter is active)
+    added_by_map: dict = {}
+    if playlist_id and rows and not isinstance(rows[0], models.Track):
+        user_ids = {row.added_by for row in rows if row.added_by}
+        if user_ids:
+            users = db.query(models.User).filter(models.User.id.in_(user_ids)).all()
+            added_by_map = {u.id: u.username for u in users}
+
+    for row in rows:
+        if playlist_id and not isinstance(row, models.Track):
+            t = row.Track
+            added_by_id = row.added_by
+        else:
+            t = row
+            added_by_id = None
         d = {c.name: getattr(t, c.name) for c in t.__table__.columns}
         d["tag_ids"] = [tag.id for tag in t.tags]
+        if added_by_id is not None:
+            d["added_by_username"] = added_by_map.get(added_by_id)
+            d["added_by_id"] = added_by_id
         result.append(d)
     return result
 

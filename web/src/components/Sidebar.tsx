@@ -53,6 +53,11 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['playlists'] }); setRenamingId(null); setPlCtxMenu(null) },
   })
 
+  const sharePlaylist = useMutation({
+    mutationFn: ({ id, shared }: { id: string; shared: boolean }) =>
+      api.playlists.updatePlaylist(id, { is_shared: shared } as Partial<Playlist>),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['playlists'] }); setPlCtxMenu(null) },
+  })
   const deletePlaylist = useMutation({
     mutationFn: (id: string) => api.playlists.deletePlaylist(id),
     onSuccess: (_, id) => {
@@ -263,6 +268,10 @@ export default function Sidebar({ selectedPlaylistId, onPlaylistSelect, selected
             <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
               onClick={() => { setRenamingId(plCtxMenu.pl.id); setRenameVal(plCtxMenu.pl.name); setPlCtxMenu(null) }}>
               Rename
+            </button>
+            <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-xkc-text"
+              onClick={() => sharePlaylist.mutate({ id: plCtxMenu.pl.id, shared: !plCtxMenu.pl.is_shared })}>
+              {plCtxMenu.pl.is_shared ? 'Stop sharing' : 'Share (collaborative)'}
             </button>
             <div className="border-t border-xkc-border my-1" />
             <button className="w-full text-left px-3 py-1.5 hover:bg-xkc-border text-red-400"

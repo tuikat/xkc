@@ -183,8 +183,10 @@ class PlaylistTrack(Base):
     track_id = Column(String(36), ForeignKey("tracks.id", ondelete="CASCADE"), primary_key=True)
     position = Column(Integer, default=0)
     added_at = Column(DateTime, server_default=func.now())
+    added_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     playlist = relationship("Playlist", back_populates="tracks")
     track = relationship("Track", back_populates="playlist_entries")
+    added_by_user = relationship("User", foreign_keys=[added_by])
 
 
 class StreamSource(Base):

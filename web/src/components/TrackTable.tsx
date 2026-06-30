@@ -18,6 +18,7 @@ interface TrackTableProps {
   onAddToPlaylist?: (trackId: string) => void
   onDeleteTrack?: (trackId: string) => void
   onReanalyze?: (trackId: string) => void
+  isSharedPlaylist?: boolean
 }
 
 interface ColDef {
@@ -119,7 +120,7 @@ function StarCell({ trackId, rating }: { trackId: string; rating: number }) {
 
 export default function TrackTable({
   tracks, onSelectTrack, selectedTrackId, tagGroups = [],
-  onAddToPlaylist, onDeleteTrack, onReanalyze,
+  onAddToPlaylist, onDeleteTrack, onReanalyze, isSharedPlaylist = false,
 }: TrackTableProps) {
   const qc = useQueryClient()
   const { filters, setFilters, playerTrack, playerPlaying, setPlayerTrack } = useStore()
@@ -226,7 +227,14 @@ export default function TrackTable({
           : <div className="h-6 rounded bg-xkc-border/20 flex items-center px-1"><span className="text-[9px] text-xkc-muted">{track.analysis_state}</span></div>
 
       case 'title':
-        return <span className="truncate text-xkc-text">{track.title || '—'}</span>
+        return (
+          <div className="flex flex-col min-w-0">
+            <span className="truncate text-xkc-text">{track.title || '—'}</span>
+            {isSharedPlaylist && track.added_by_username && (
+              <span className="text-[10px] text-xkc-muted truncate">by {track.added_by_username}</span>
+            )}
+          </div>
+        )
 
       case 'artist': {
         const chips = splitChips(track.artist)

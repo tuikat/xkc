@@ -12,6 +12,7 @@ export function getAudio() {
     _audio = new Audio()
     _audio.preload = 'auto'
     _audio.crossOrigin = 'use-credentials'
+    ;(window as any).__xkcAudio = _audio
   }
   return _audio!
 }

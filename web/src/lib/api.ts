@@ -37,6 +37,8 @@ export interface Track {
   comment: string | null
   tag_ids?: string[]
   cues?: Cue[]
+  added_by_username?: string | null
+  added_by_id?: string | null
 }
 
 export interface Cue {

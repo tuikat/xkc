@@ -45,6 +45,20 @@ export default function Library() {
   const { data: tagGroups = [] } = useQuery({ queryKey: ['tagGroups'], queryFn: api.tags.getTagGroups })
   const { data: playlists = [] } = useQuery({ queryKey: ['playlists'], queryFn: api.playlists.getPlaylists })
 
+  // Spacebar → play/pause (skip when focus is inside an input/textarea)
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (e.code === 'Space' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
+        e.preventDefault()
+        const audio = (window as any).__xkcAudio as HTMLAudioElement | undefined
+        if (audio) { audio.paused ? audio.play() : audio.pause() }
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [])
+
   // Poll while any track is still being analyzed so columns fill in without a manual refresh
   const hasAnalyzing = tracks.some((t) => t.analysis_state === 'analyzing' || t.analysis_state === 'pending')
   useEffect(() => {
@@ -231,12 +245,6 @@ export default function Library() {
                     BPM: {filters.minBpm ?? ''}–{filters.maxBpm ?? ''} <X size={10} />
                   </button>
                 )}
-                {filters.analysis_state === 'failed' && (
-                  <button onClick={() => setFilters({ ...filters, analysis_state: undefined })}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30">
-                    Errors only <X size={10} />
-                  </button>
-                )}
                 {Object.values(filters).some(Boolean) && (
                   <button onClick={() => setFilters({})} className="text-xkc-muted hover:text-red-400 ml-auto">
                     Clear all
@@ -248,6 +256,7 @@ export default function Library() {
                 onSelectTrack={setSelectedTrackId}
                 selectedTrackId={selectedTrackId}
                 tagGroups={tagGroups}
+                isSharedPlaylist={!!(selectedPlaylistId && playlists.find(p => p.id === selectedPlaylistId)?.is_shared)}
                 onAddToPlaylist={(trackId) => {
                   const pl = playlists[0]
                   if (pl) api.playlists.addTracks(pl.id, [trackId])
