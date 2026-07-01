@@ -98,7 +98,7 @@ _SCHEMA_STATEMENTS = [
         `discNo` INTEGER,
         `artist_id_artist` INTEGER,
         `artist_id_remixer` INTEGER,
-        `originalartist_id` INTEGER,
+        `artist_id_originalArtist` INTEGER,
         `artist_id_composer` INTEGER,
         `artist_id_lyricist` INTEGER,
         `album_id` INTEGER,
@@ -240,7 +240,7 @@ _SCHEMA_STATEMENTS = [
     )""",
     """CREATE TABLE `property`(
         `deviceName` TEXT NOT NULL,
-        `dbVersion` INTEGER NOT NULL,
+        `dbVersion` TEXT NOT NULL,
         `numberOfContents` INTEGER NOT NULL,
         `createdDate` TEXT NOT NULL,
         `backGroundColorType` INTEGER NOT NULL,
@@ -260,6 +260,70 @@ _SCHEMA_STATEMENTS = [
         `isVisible` INTEGER NOT NULL,
         `isSelectedAsSubColumn` INTEGER NOT NULL
     )""",
+]
+
+# Fixed reference/lookup data that a real rekordbox export seeds into every
+# Device Library Plus database regardless of library content -- verified byte
+# -for-byte against a real device's exportLibrary.db (small 2-track test
+# export still had all of this populated). Without these, a CDJ has nothing
+# to build its browse menu (menuItem/category/sort) or color-coding UI
+# (color) from, and rekordbox's own validator may check for their presence.
+# The ￺/￻ wrapper characters around menuItem names are Unicode
+# "interlinear annotation" marks (U+FFFA/U+FFFB) that rekordbox/CDJ firmware
+# uses to substitute the localized menu label at display time -- preserved
+# byte-for-byte from the real device, not decorative.
+_MENU_ITEMS = [
+    (1, 128, "￺GENRE￻"), (2, 129, "￺ARTIST￻"),
+    (3, 130, "￺ALBUM￻"), (4, 131, "￺TRACK￻"),
+    (5, 133, "￺BPM￻"), (6, 134, "￺RATING￻"),
+    (7, 135, "￺YEAR￻"), (8, 136, "￺REMIXER￻"),
+    (9, 137, "￺LABEL￻"), (10, 138, "￺ORIGINAL ARTIST￻"),
+    (11, 139, "￺KEY￻"), (12, 141, "￺CUE￻"),
+    (13, 142, "￺COLOR￻"), (14, 146, "￺TIME￻"),
+    (15, 147, "￺BITRATE￻"), (16, 148, "￺FILE NAME￻"),
+    (17, 132, "￺PLAYLIST￻"), (18, 152, "￺HOT CUE BANK￻"),
+    (19, 149, "￺HISTORY￻"), (20, 145, "￺SEARCH￻"),
+    (21, 150, "￺COMMENTS￻"), (22, 140, "￺DATE ADDED￻"),
+    (23, 151, "￺DJ PLAY COUNT￻"), (24, 144, "￺FOLDER￻"),
+    (25, 161, "￺DEFAULT￻"), (26, 162, "￺ALPHABET￻"),
+    (27, 170, "￺MATCHING￻"),
+]
+_CATEGORIES = [
+    (1, 1, 0, 0), (2, 2, 1, 1), (3, 3, 2, 1), (4, 4, 3, 1), (5, 17, 5, 1),
+    (6, 5, 0, 0), (7, 6, 0, 0), (8, 7, 0, 0), (9, 8, 0, 0), (10, 9, 0, 0),
+    (11, 10, 0, 0), (12, 11, 4, 1), (15, 13, 0, 0), (17, 24, 9, 1),
+    (18, 20, 7, 1), (19, 14, 0, 0), (20, 15, 0, 0), (21, 16, 0, 0),
+    (22, 19, 6, 1), (23, 18, 0, 0), (26, 27, 8, 1), (27, 22, 10, 0),
+]
+_SORTS = [
+    (0, 25, 1, 1, 0), (1, 26, 2, 1, 0), (2, 2, 3, 1, 0), (3, 3, 4, 1, 0),
+    (4, 5, 5, 1, 0), (5, 6, 6, 1, 0), (6, 1, 0, 0, 0), (7, 21, 0, 0, 0),
+    (8, 14, 0, 0, 0), (9, 8, 0, 0, 0), (10, 9, 0, 0, 0), (11, 10, 0, 0, 0),
+    (12, 11, 7, 1, 0), (13, 15, 0, 0, 0), (15, 13, 0, 0, 0),
+    (16, 23, 0, 0, 0), (17, 22, 0, 0, 0),
+]
+_COLORS = [
+    (1, "Pink"), (2, "Red"), (3, "Orange"), (4, "Yellow"),
+    (5, "Green"), (6, "Aqua"), (7, "Blue"), (8, "Purple"),
+]
+# Standard My Tag preset hierarchy (4 top-level categories, 24 child tags).
+# IDs are opaque/large on the real device (not sequential) -- copied
+# verbatim since they're a fixed preset library, not per-track generated.
+_MY_TAGS = [
+    (1, 0, "Genre", 1, 0), (2, 1, "Components", 1, 0), (3, 2, "Situation", 1, 0),
+    (4, 3, "Untitled Column", 1, 0),
+    (31119643, 6, "Trap", 0, 1), (233353604, 2, "Lounge", 0, 3),
+    (307356157, 2, "Beat", 0, 2), (467736369, 3, "Mid Night", 0, 3),
+    (577044029, 1, "Vocal", 0, 2), (683321797, 1, "Deep House", 0, 1),
+    (1139528591, 5, "Build up", 0, 3), (1145691039, 3, "Sub Bass", 0, 2),
+    (1260156560, 5, "Bass Music", 0, 1), (1551943846, 4, "Electro House", 0, 1),
+    (1560894668, 4, "Percussion", 0, 2), (1748645585, 2, "Techno", 0, 1),
+    (1783890014, 1, "Second Floor", 0, 3), (1819948694, 7, "Build down", 0, 3),
+    (2565881963, 0, "Synth", 0, 2), (2662600583, 7, "Upper", 0, 2),
+    (3035367868, 0, "Acid House", 0, 1), (3134770480, 4, "Morning", 0, 3),
+    (3151014943, 0, "My Comment", 0, 4), (3413658105, 0, "Main Floor", 0, 3),
+    (3691474187, 3, "Nu Disco", 0, 1), (3769730008, 5, "Piano", 0, 2),
+    (4147545811, 6, "Dark", 0, 2), (4151666520, 6, "Peak Time", 0, 3),
 ]
 
 
@@ -286,13 +350,18 @@ class DLPWriter:
         cur.execute("PRAGMA journal_mode = WAL;")
         for stmt in _SCHEMA_STATEMENTS:
             cur.execute(stmt)
+        cur.executemany("INSERT INTO `menuItem` VALUES (?,?,?)", _MENU_ITEMS)
+        cur.executemany("INSERT INTO `category` VALUES (?,?,?,?)", _CATEGORIES)
+        cur.executemany("INSERT INTO `sort` VALUES (?,?,?,?,?)", _SORTS)
+        cur.executemany("INSERT INTO `color` VALUES (?,?)", _COLORS)
+        cur.executemany("INSERT INTO `myTag` VALUES (?,?,?,?,?)", _MY_TAGS)
         self.con.commit()
         self.device_name = device_name
         self._artist_ids: dict = {}
         self._genre_ids: dict = {}
         self._label_ids: dict = {}
         self._key_ids: dict = {}
-        self._color_ids: dict = {}
+        self._color_ids: dict = {name: cid for cid, name in _COLORS}
         self._image_ids: dict = {}
         self._album_ids: dict = {}
         self._track_count = 0
@@ -321,7 +390,9 @@ class DLPWriter:
         return self._get_or_create(self._key_ids, "key", name)
 
     def get_or_create_color(self, name: Optional[str]) -> Optional[int]:
-        return self._get_or_create(self._color_ids, "color", name)
+        # color is a fixed 8-row reference table seeded at construction time
+        # (matches the real device exactly) -- look up only, never insert.
+        return self._color_ids.get(name) if name else None
 
     def get_or_create_image(self, path: Optional[str]) -> Optional[int]:
         if not path:
@@ -424,7 +495,7 @@ class DLPWriter:
             """INSERT INTO `property` (
                 deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID
             ) VALUES (?,?,?,?,?,?)""",
-            (self.device_name, 1, self._track_count, _now_iso(), 0, my_tag_master_dbid),
+            (self.device_name, "1000", self._track_count, _now_iso(), 0, my_tag_master_dbid),
         )
         self.con.commit()
 
