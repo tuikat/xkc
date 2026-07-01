@@ -328,6 +328,14 @@ async fn sync_usb(
                     &format!("Writing to USB: {}% (file {} of {})", pct, i + 1, total_files));
             }
         }
+        // Force this file's data out of the OS write-back cache and onto the
+        // physical USB device now, rather than leaving it buffered. Without
+        // this, "Sync complete" can appear before the drive actually has the
+        // data -- if the user ejects/unplugs right away (easy to do, since we
+        // just made this feel fast with the new progress bar), files can be
+        // truncated or missing on the device even though they "looked" written.
+        outfile.sync_all()
+            .map_err(|e| format!("Failed to flush {} to USB: {}", zf.name(), e))?;
     }
 
     std::fs::remove_file(&tmp_path).ok();

@@ -1,6 +1,6 @@
 [package]
 name = "xkc-desktop"
-version = "1.5.2"
+version = "1.5.3"
 description = "XKC DJ Library Manager"
 authors = ["XKC"]
 edition = "2021"
