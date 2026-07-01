@@ -309,11 +309,16 @@ class DLPWriter:
                 path, file_name, file_size, file_type, bitrate_kbps, 16, 44100,
                 isrc or "", 0, 1, 1,
                 "", analysis_path, 0,
-                self._master_db_id, random.randint(1, 2**31 - 1), 41, 788224,
+                self._master_db_id, 0, 41, 788224,
             ),
         )
+        row_id = cur.lastrowid
+        # masterContentId is a self-reference to the row's own content id (per
+        # pyrekordbox: DjmdContent.MasterSongID == ID). A random unrelated value
+        # dangles the join and rekordbox flags the library corrupt.
+        cur.execute("UPDATE `content` SET masterContentId = ? WHERE content_id = ?", (row_id, row_id))
         self._track_count += 1
-        return cur.lastrowid
+        return row_id
 
     def add_cue(
         self, content_id: int, *, position_ms: int, hot_cue_slot: Optional[int] = None,
@@ -369,19 +374,16 @@ class DLPWriter:
         )
         self.con.commit()
 
-        # sqlite3_close() runs an implicit final checkpoint that merges and
-        # deletes the -wal/-shm sidecar files. Real rekordbox exports ship with
-        # those files still present (rekordbox never cleanly checkpoints before
-        # the USB is ejected) -- capture their bytes before close and restore
-        # them afterward so the on-disk file set matches a real device exactly.
-        wal_path = self._path + "-wal"
-        shm_path = self._path + "-shm"
-        wal_bytes = Path(wal_path).read_bytes() if Path(wal_path).exists() else None
-        shm_bytes = Path(shm_path).read_bytes() if Path(shm_path).exists() else None
-
+        # Fully checkpoint the WAL back into the main db and ship a SELF-CONTAINED
+        # exportLibrary.db with no -wal/-shm sidecars. A hand-built SQLCipher db
+        # left alongside a stale/uncheckpointed -wal that doesn't match the main
+        # file is the classic trigger for rekordbox's "database disk image is
+        # malformed / device library corrupted" -- an earlier version of this
+        # code deliberately restored those sidecars to mimic a real drive, which
+        # was almost certainly self-inflicted corruption. TRUNCATE empties the
+        # WAL, then close() removes the (now-empty) sidecar files.
+        cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        self.con.commit()
         self.con.close()
-
-        if wal_bytes is not None:
-            Path(wal_path).write_bytes(wal_bytes)
-        if shm_bytes is not None:
-            Path(shm_path).write_bytes(shm_bytes)
+        Path(self._path + "-wal").unlink(missing_ok=True)
+        Path(self._path + "-shm").unlink(missing_ok=True)
