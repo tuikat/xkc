@@ -37,6 +37,7 @@ Ground truth used here, and how confident each piece is:
   public enum, not independently confirmed against real files.
 """
 import logging
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -171,7 +172,7 @@ def _now_iso() -> str:
 class DLPWriter:
     """Builds a fresh exportLibrary.db from scratch at `path`."""
 
-    def __init__(self, path: str, device_name: str = "XKC"):
+    def __init__(self, path: str, device_name: str = ""):
         from sqlcipher3 import dbapi2 as sqlite3
         Path(path).unlink(missing_ok=True)
         Path(path + "-wal").unlink(missing_ok=True)
@@ -194,6 +195,13 @@ class DLPWriter:
         cur.executemany("INSERT INTO `myTag` VALUES (?,?,?,?,?)", _MY_TAGS)
         self.con.commit()
         self.device_name = device_name
+        # A real export stamps every content row with a per-database identity id
+        # (masterDbId, constant across rows) and gives the property table its own
+        # large opaque myTagMasterDBID. rekordbox writes these on its own libraries;
+        # leaving them NULL/trivial can make rekordbox treat the library as not a
+        # valid one of its own. Mint random 31-bit ids to mirror that shape.
+        self._master_db_id = random.randint(1, 2**31 - 1)
+        self._my_tag_master_db_id = random.randint(1, 2**31 - 1)
         self._artist_ids: dict = {}
         self._genre_ids: dict = {}
         self._label_ids: dict = {}
@@ -272,13 +280,16 @@ class DLPWriter:
     ) -> int:
         cur = self.con.cursor()
         file_type = FILE_TYPE.get(ext.lstrip('.').lower(), 0)
+        # rekordbox stores bitrate in kbps (real export = 128), but callers hand us
+        # bit/s from the audio tags (128000). Normalise anything that looks like
+        # bit/s down to kbps.
+        bitrate_kbps = int(round(bitrate / 1000)) if bitrate and bitrate > 10000 else bitrate
         # Defaults below mirror what a real rekordbox export writes: it fills
-        # numeric/text fields with 0/'' rather than leaving them NULL, and sets
-        # isHotCueAutoLoadOn/isKuvoDeliverStatusOn to 1. titleForSearch is left
-        # NULL exactly as the real export does. The internal cloud-sync ids
-        # (masterDbId, masterContentId, analysedBits, contentLink) are left NULL
-        # -- their generation algorithm is unknown and they aren't needed for
-        # standalone playback; NULL is a valid value for those nullable columns.
+        # numeric/text fields with 0/'' rather than leaving them NULL, sets
+        # isHotCueAutoLoadOn/isKuvoDeliverStatusOn to 1, and stamps every row with
+        # masterDbId (per-DB constant), a per-track masterContentId, analysedBits
+        # (41) and contentLink -- matched to a real export. titleForSearch is left
+        # NULL exactly as the real export does.
         cur.execute(
             """INSERT INTO `content` (
                 title, titleForSearch, subtitle, bpmx100, length, trackNo, discNo,
@@ -287,16 +298,18 @@ class DLPWriter:
                 djComment, rating, releaseYear, releaseDate, dateCreated, dateAdded,
                 path, fileName, fileSize, fileType, bitrate, bitDepth, samplingRate,
                 isrc, djPlayCount, isHotCueAutoLoadOn, isKuvoDeliverStatusOn,
-                kuvoDeliveryComment, analysisDataFilePath, hasModified
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                kuvoDeliveryComment, analysisDataFilePath, hasModified,
+                masterDbId, masterContentId, analysedBits, contentLink
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 title, None, "", int(round(bpm * 100)) if bpm else 0, duration_s or 0, 0, 0,
                 artist_id, remixer_id, 0,
                 album_id, genre_id, label_id, key_id, color_id if color_id is not None else 0, image_id,
                 comment or "", rating or 0, year or 0, "", date_added, date_added,
-                path, file_name, file_size, file_type, bitrate, 16, 44100,
+                path, file_name, file_size, file_type, bitrate_kbps, 16, 44100,
                 isrc or "", 0, 1, 1,
                 "", analysis_path, 0,
+                self._master_db_id, random.randint(1, 2**31 - 1), 41, 788224,
             ),
         )
         self._track_count += 1
@@ -339,13 +352,20 @@ class DLPWriter:
             (playlist_id, content_id, sort_order),
         )
 
-    def finalize(self, my_tag_master_dbid: int = 1):
+    def finalize(self, my_tag_master_dbid: Optional[int] = None):
         cur = self.con.cursor()
+        # createdDate is DATE-ONLY in a real export ("2026-07-01"), matching the
+        # content dateAdded/dateCreated format. We were writing a full timestamp
+        # ("2026-07-01 10:40:50") here, which a strict date parser in rekordbox's
+        # device-library validator would reject -- and it was inconsistent with
+        # our own date-only content rows.
+        created_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         cur.execute(
             """INSERT INTO `property` (
                 deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID
             ) VALUES (?,?,?,?,?,?)""",
-            (self.device_name, "1000", self._track_count, _now_iso(), 0, my_tag_master_dbid),
+            (self.device_name, "1000", self._track_count, created_date, 0,
+             my_tag_master_dbid if my_tag_master_dbid is not None else self._my_tag_master_db_id),
         )
         self.con.commit()
 
