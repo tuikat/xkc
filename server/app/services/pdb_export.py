@@ -231,6 +231,77 @@ def _build_export_pdb(tracks_data: list, playlists_data: list, artwork_dir: Path
     return w.build()
 
 
+def _build_export_library_db(tracks_data: list, playlists_data: list, dest_path: Path) -> None:
+    """Build exportLibrary.db (Device Library Plus / OneLibrary) at dest_path.
+    Newer/unverified-on-hardware relative to export.pdb -- see dlp_writer.py's
+    module docstring for exactly what is and isn't confirmed. Written
+    alongside export.pdb, never instead of it: some devices need one, some
+    need the other, and some (older CDJ-3000 firmware) apparently need both
+    present to fall back correctly."""
+    from app.services.dlp_writer import DLPWriter
+
+    w = DLPWriter(str(dest_path))
+    artist_ids: dict = {}
+    genre_ids: dict = {}
+    label_ids: dict = {}
+    key_ids: dict = {}
+    album_ids: dict = {}
+    track_row_id: dict = {}
+
+    for t in tracks_data:
+        try:
+            artist_id = w.get_or_create_artist(t.get('artist'))
+            remixer_id = w.get_or_create_artist(t.get('remixer'))
+            genre_id = w.get_or_create_genre(t.get('genre'))
+            label_id = w.get_or_create_label(t.get('label'))
+            key_id = w.get_or_create_key(t.get('key_musical'))
+            album_id = w.get_or_create_album(t.get('album'), artist_id=artist_id)
+
+            src = t.get('file_path') or ''
+            ext = Path(src).suffix or f".{(t.get('file_format') or 'mp3')}"
+            # Reuse the same flat Contents/{uuid}.ext files already written for
+            # export.pdb rather than duplicating audio under a per-artist folder
+            # layout -- halves USB space usage for large libraries.
+            usb_path = f"Contents/{t['id']}{ext}"
+
+            row_id = w.add_track(
+                title=t.get('title') or '', path=usb_path, ext=ext,
+                date_added=(t.get('date_added') or '')[:10],
+                artist_id=artist_id, remixer_id=remixer_id, album_id=album_id,
+                genre_id=genre_id, label_id=label_id, key_id=key_id,
+                bpm=t.get('bpm'), duration_s=int((t.get('duration_ms') or 0) / 1000),
+                rating=t.get('rating') or 0, comment=t.get('comment'),
+                file_size=t.get('file_size'), bitrate=t.get('bitrate'),
+                year=t.get('year'), file_name=f"{t['id']}{ext}",
+                analysis_path=f"PIONEER/USBANLZ/{t['id']}/ANLZ0000.DAT",
+            )
+            track_row_id[t['id']] = row_id
+
+            for cue in t.get('cues') or []:
+                pos_ms = cue.get('position_ms', 0)
+                hot_slot = (cue.get('sort_order', 0) + 1) if cue.get('type') == 'hot' else None
+                loop_ms = cue.get('loop_length_ms') if cue.get('type') == 'loop' else None
+                w.add_cue(row_id, position_ms=pos_ms, hot_cue_slot=hot_slot,
+                          comment=cue.get('label'), loop_length_ms=loop_ms)
+        except Exception as e:
+            logger.warning(f"DLP export: failed to build content row for track {t['id']} ({t.get('title')}): {e}")
+
+    for pl_idx, pl in enumerate(playlists_data):
+        try:
+            playlist_id = w.add_playlist(pl['name'], parent_id=0, sort_order=pl_idx)
+            entry_idx = 0
+            for t_uuid in pl.get('track_ids', []):
+                row_id = track_row_id.get(t_uuid)
+                if row_id is None:
+                    continue
+                w.add_playlist_entry(playlist_id, row_id, entry_idx)
+                entry_idx += 1
+        except Exception as e:
+            logger.warning(f"DLP export: failed to build playlist {pl.get('name')}: {e}")
+
+    w.finalize()
+
+
 def build_usb_export(
     playlist_ids: List[str],
     db: Session,
@@ -355,6 +426,18 @@ def build_usb_export(
     artwork_dir = export_dir / "PIONEER" / "Artwork"
     pdb_bytes = _build_export_pdb(ordered_tracks, playlists_data, artwork_dir)
     (pioneer_dir / "export.pdb").write_bytes(pdb_bytes)
+
+    # Also write exportLibrary.db (Device Library Plus / OneLibrary) -- some
+    # newer firmware (including some CDJ-3000 versions) requires this and
+    # won't fall back to export.pdb if it's missing. This is new and less
+    # battle-tested than the legacy writer above, so a failure here logs and
+    # continues rather than sinking an otherwise-good export.
+    report(total, total, "building device library plus database")
+    try:
+        _build_export_library_db(ordered_tracks, playlists_data, pioneer_dir / "exportLibrary.db")
+    except Exception as e:
+        logger.warning(f"Export: exportLibrary.db (Device Library Plus) generation failed, "
+                        f"continuing with export.pdb only: {e}")
 
     report(total, total, "compressing")
     zip_path = Path(settings.data_dir) / "exports" / f"{job_id}.zip"
