@@ -325,9 +325,10 @@ class DLPWriter:
     def add_playlist(self, name: str, parent_id: int = 0, sort_order: int = 0,
                       is_folder: bool = False) -> int:
         cur = self.con.cursor()
+        # image_id is 0 (not NULL) in a real export -- match that.
         cur.execute(
-            "INSERT INTO `playlist` (sequenceNo, name, attribute, playlist_id_parent) VALUES (?,?,?,?)",
-            (sort_order, name, PLAYLIST_TYPE_FOLDER if is_folder else PLAYLIST_TYPE_LIST, parent_id),
+            "INSERT INTO `playlist` (sequenceNo, name, image_id, attribute, playlist_id_parent) VALUES (?,?,?,?,?)",
+            (sort_order, name, 0, PLAYLIST_TYPE_FOLDER if is_folder else PLAYLIST_TYPE_LIST, parent_id),
         )
         return cur.lastrowid
 

@@ -261,8 +261,12 @@ def _build_export_library_db(tracks_data: list, playlists_data: list, dest_path:
             ext = Path(src).suffix or f".{(t.get('file_format') or 'mp3')}"
             # Reuse the same flat Contents/{uuid}.ext files already written for
             # export.pdb rather than duplicating audio under a per-artist folder
-            # layout -- halves USB space usage for large libraries.
-            usb_path = f"Contents/{t['id']}{ext}"
+            # layout -- halves USB space usage for large libraries. Paths MUST be
+            # drive-root-absolute (leading slash): a real rekordbox export stores
+            # "/Contents/..." and "/PIONEER/...", and rekordbox resolves them as
+            # <drive_root> + path -- a relative "Contents/..." makes it fail to
+            # locate the files and flag the device library as corrupted.
+            usb_path = f"/Contents/{t['id']}{ext}"
 
             row_id = w.add_track(
                 title=t.get('title') or '', path=usb_path, ext=ext,
@@ -273,7 +277,7 @@ def _build_export_library_db(tracks_data: list, playlists_data: list, dest_path:
                 rating=t.get('rating') or 0, comment=t.get('comment'),
                 file_size=t.get('file_size'), bitrate=t.get('bitrate'),
                 year=t.get('year'), file_name=f"{t['id']}{ext}",
-                analysis_path=f"PIONEER/USBANLZ/{t['id']}/ANLZ0000.DAT",
+                analysis_path=f"/PIONEER/USBANLZ/{t['id']}/ANLZ0000.DAT",
             )
             track_row_id[t['id']] = row_id
 
