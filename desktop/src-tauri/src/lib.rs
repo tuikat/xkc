@@ -1,9 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::path::Path;
+use std::io::{Read, Write};
 use tauri::{AppHandle, Emitter, Manager, State};
 use notify::{Watcher, RecursiveMode, Event, EventKind};
 use serde_json::{json, Value};
+use futures_util::StreamExt;
+
+fn mb(bytes: u64) -> f64 {
+    bytes as f64 / 1_048_576.0
+}
 
 const AUDIO_EXTS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4a", "ogg", "opus", "aac"];
 
@@ -247,36 +253,80 @@ async fn sync_usb(
         return Err(format!("Download failed: {}", zip_res.status()));
     }
 
-    let bytes = zip_res.bytes().await.map_err(|e| e.to_string())?;
-    let mb = bytes.len() as f64 / 1_048_576.0;
-    emit_sync_progress(&app, &mount_point, "downloading", &format!("Downloaded {:.1} MB", mb));
+    // Stream the download so we can report real progress instead of blocking
+    // silently until the whole (potentially very large, thousands-of-tracks)
+    // zip has arrived.
+    let total_size = zip_res.content_length().unwrap_or(0);
     let tmp_path = std::env::temp_dir().join("xkc_usb_export.zip");
-    std::fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
+    {
+        let mut tmp_file = std::fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
+        let mut stream = zip_res.bytes_stream();
+        let mut downloaded: u64 = 0;
+        let mut last_emit = std::time::Instant::now();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            downloaded += chunk.len() as u64;
+            tmp_file.write_all(&chunk).map_err(|e| e.to_string())?;
+            if last_emit.elapsed().as_millis() >= 200 || downloaded >= total_size {
+                last_emit = std::time::Instant::now();
+                let detail = if total_size > 0 {
+                    let pct = (downloaded * 100 / total_size).min(100);
+                    format!("Downloading: {}% ({:.1}/{:.1} MB)", pct, mb(downloaded), mb(total_size))
+                } else {
+                    format!("Downloading: {:.1} MB", mb(downloaded))
+                };
+                emit_sync_progress(&app, &mount_point, "downloading", &detail);
+            }
+        }
+    }
 
-    // 4. Extract to USB mount point
+    // 4. Extract to USB mount point, tracking real bytes written (not just
+    // file count) since track files vary wildly in size and USB write speed
+    // is what actually makes this slow.
     let file = std::fs::File::open(&tmp_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let mount = Path::new(&mount_point);
     let total_files = archive.len();
-    emit_sync_progress(&app, &mount_point, "extracting", &format!("Extracting {} files to USB...", total_files));
 
+    let mut total_bytes: u64 = 0;
+    for i in 0..total_files {
+        if let Ok(zf) = archive.by_index(i) {
+            total_bytes += zf.size();
+        }
+    }
+    emit_sync_progress(&app, &mount_point, "extracting",
+        &format!("Writing {} files ({:.1} MB) to USB...", total_files, mb(total_bytes)));
+
+    let mut written_bytes: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+    let mut buf = [0u8; 65536];
     for i in 0..total_files {
         let mut zf = archive.by_index(i).map_err(|e| e.to_string())?;
         let outpath = mount.join(zf.name());
         if zf.name().ends_with('/') {
             std::fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = outpath.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut outfile = std::fs::File::create(&outpath)
-                .map_err(|e| format!("Failed to write {} to USB: {}", zf.name(), e))?;
-            std::io::copy(&mut zf, &mut outfile)
-                .map_err(|e| format!("Failed to write {} to USB: {}", zf.name(), e))?;
+            continue;
         }
-        if total_files > 0 && (i % 50 == 0 || i == total_files - 1) {
-            emit_sync_progress(&app, &mount_point, "extracting",
-                &format!("Extracting file {} of {}", i + 1, total_files));
+        if let Some(parent) = outpath.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut outfile = std::fs::File::create(&outpath)
+            .map_err(|e| format!("Failed to write {} to USB: {}", zf.name(), e))?;
+        loop {
+            let n = zf.read(&mut buf)
+                .map_err(|e| format!("Failed to read {} from export: {}", zf.name(), e))?;
+            if n == 0 {
+                break;
+            }
+            outfile.write_all(&buf[..n])
+                .map_err(|e| format!("Failed to write {} to USB: {}", zf.name(), e))?;
+            written_bytes += n as u64;
+            if last_emit.elapsed().as_millis() >= 200 {
+                last_emit = std::time::Instant::now();
+                let pct = if total_bytes > 0 { (written_bytes * 100 / total_bytes).min(100) } else { 0 };
+                emit_sync_progress(&app, &mount_point, "extracting",
+                    &format!("Writing to USB: {}% (file {} of {})", pct, i + 1, total_files));
+            }
         }
     }
 
