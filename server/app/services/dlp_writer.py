@@ -47,11 +47,12 @@ logger = logging.getLogger(__name__)
 # XKC-specific or license-specific.
 DLP_KEY = "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls"
 
-# MEDIUM CONFIDENCE: inferred from declaration order of a third-party tool's
-# FileType enum, not independently confirmed.
+# mp3 = 1 is CONFIRMED against a real rekordbox export. The rest are the
+# widely-documented rekordbox djmdContent.FileType values (MEDIUM confidence,
+# not yet confirmed against real files of those formats).
 FILE_TYPE = {
-    'mp3': 0, 'mp4': 2, 'alac': 3, 'flac': 4, 'm4a': 5,
-    'wav': 6, 'aiff': 7, 'aif': 7, 'ogg': 0, 'opus': 0,
+    'mp3': 1, 'm4a': 4, 'aac': 4, 'mp4': 4, 'flac': 5,
+    'alac': 5, 'wav': 11, 'aiff': 12, 'aif': 12, 'ogg': 0, 'opus': 0,
 }
 PLAYLIST_TYPE_LIST = 0
 PLAYLIST_TYPE_FOLDER = 1
@@ -61,205 +62,41 @@ PLAYLIST_TYPE_FOLDER = 1
 # being set rather than a separate `kind` value.
 CUE_KIND_MEMORY = 0
 
+# Verbatim schema copied byte-for-byte from a real rekordbox-exported
+# exportLibrary.db (22 tables + 4 indexes, no __diesel_schema_migrations).
+# Kept EXACTLY as rekordbox writes it -- lowercase `varchar`/`integer`, no
+# NOT NULL/FK decoration -- so column names/order/types match what
+# rekordbox's own device-library validator expects (a missing column like
+# djPlayCount, or a renamed one, makes rekordbox report the library as
+# corrupted). Do not hand-edit; re-dump from a real export if the format
+# ever changes.
 _SCHEMA_STATEMENTS = [
-    """CREATE TABLE `album`(
-        `album_id` INTEGER PRIMARY KEY,
-        `name` TEXT NOT NULL,
-        `artist_id` INTEGER,
-        `image_id` INTEGER,
-        `isComplation` INTEGER NOT NULL,
-        `nameForSearch` TEXT,
-        FOREIGN KEY (`artist_id`) REFERENCES `artist`(`id`),
-        FOREIGN KEY (`image_id`) REFERENCES `image`(`id`)
-    )""",
-    """CREATE TABLE `artist`(
-        `artist_id` INTEGER PRIMARY KEY,
-        `name` TEXT NOT NULL,
-        `nameForSearch` TEXT
-    )""",
-    """CREATE TABLE `category`(
-        `category_id` INTEGER PRIMARY KEY,
-        `menuitem_id` INTEGER NOT NULL,
-        `sequenceNo` INTEGER NOT NULL,
-        `isVisible` INTEGER NOT NULL
-    )""",
-    """CREATE TABLE `color`(
-        `color_id` INTEGER PRIMARY KEY,
-        `name` TEXT NOT NULL
-    )""",
-    """CREATE TABLE `content`(
-        `content_id` INTEGER PRIMARY KEY,
-        `title` TEXT,
-        `titleForSearch` TEXT,
-        `subtitle` TEXT,
-        `bpmx100` INTEGER,
-        `length` INTEGER,
-        `trackNo` INTEGER,
-        `discNo` INTEGER,
-        `artist_id_artist` INTEGER,
-        `artist_id_remixer` INTEGER,
-        `artist_id_originalArtist` INTEGER,
-        `artist_id_composer` INTEGER,
-        `artist_id_lyricist` INTEGER,
-        `album_id` INTEGER,
-        `genre_id` INTEGER,
-        `label_id` INTEGER,
-        `key_id` INTEGER,
-        `color_id` INTEGER,
-        `image_id` INTEGER,
-        `djComment` TEXT,
-        `rating` INTEGER,
-        `releaseYear` INTEGER,
-        `releaseDate` TEXT,
-        `dateCreated` TEXT NOT NULL,
-        `dateAdded` TEXT NOT NULL,
-        `path` TEXT NOT NULL,
-        `fileName` TEXT,
-        `fileSize` INTEGER,
-        `fileType` INTEGER,
-        `bitrate` INTEGER,
-        `bitDepth` INTEGER,
-        `samplingRate` INTEGER,
-        `isrc` TEXT,
-        `isHotCueAutoLoadOn` INTEGER,
-        `isKuvoDeliverStatusOn` INTEGER,
-        `kuvoDeliveryComment` TEXT,
-        `masterDbId` INTEGER,
-        `masterContentId` INTEGER,
-        `analysisDataFilePath` TEXT,
-        `analysedBits` INTEGER,
-        `contentLink` INTEGER,
-        `hasModified` INTEGER,
-        `cueUpdateCount` INTEGER,
-        `analysisDataUpdateCount` INTEGER,
-        `informationUpdateCount` INTEGER,
-        FOREIGN KEY (`album_id`) REFERENCES `album`(`id`),
-        FOREIGN KEY (`genre_id`) REFERENCES `genre`(`id`),
-        FOREIGN KEY (`label_id`) REFERENCES `label`(`id`),
-        FOREIGN KEY (`key_id`) REFERENCES `key`(`id`),
-        FOREIGN KEY (`color_id`) REFERENCES `color`(`id`),
-        FOREIGN KEY (`image_id`) REFERENCES `image`(`id`)
-    )""",
-    """CREATE TABLE `cue`(
-        `cue_id` INTEGER PRIMARY KEY,
-        `content_id` INTEGER NOT NULL,
-        `kind` INTEGER,
-        `colorTableIndex` INTEGER,
-        `cueComment` TEXT,
-        `isActiveLoop` INTEGER,
-        `beatLoopNumerator` INTEGER,
-        `beatLoopDenominator` INTEGER,
-        `inUsec` INTEGER,
-        `outUsec` INTEGER,
-        `in150FramePerSec` INTEGER,
-        `out150FramePerSec` INTEGER,
-        `inMpegFrameNumber` INTEGER,
-        `outMpegFrameNumber` INTEGER,
-        `inMpegAbs` INTEGER,
-        `outMpegAbs` INTEGER,
-        `inDecodingStartFramePosition` INTEGER,
-        `outDecodingStartFramePosition` INTEGER,
-        `inFileOffsetInBlock` INTEGER,
-        `outFileOffsetInBlock` INTEGER,
-        `inNumberOfSampleInBlock` INTEGER,
-        `outNumberOfSampleInBlock` INTEGER
-    )""",
-    """CREATE TABLE `genre`(
-        `genre_id` INTEGER PRIMARY KEY,
-        `name` TEXT NOT NULL
-    )""",
-    """CREATE TABLE `history`(
-        `history_id` INTEGER PRIMARY KEY,
-        `sequenceNo` INTEGER NOT NULL,
-        `name` TEXT NOT NULL,
-        `attribute` INTEGER NOT NULL,
-        `history_id_parent` INTEGER NOT NULL
-    )""",
-    """CREATE TABLE `history_content`(
-        `history_id` INTEGER NOT NULL,
-        `content_id` INTEGER NOT NULL,
-        `sequenceNo` INTEGER NOT NULL,
-        PRIMARY KEY(`history_id`, `content_id`)
-    )""",
-    """CREATE TABLE `hotCueBankList`(
-        `hotCueBankList_id` INTEGER PRIMARY KEY,
-        `sequenceNo` INTEGER NOT NULL,
-        `name` TEXT,
-        `image_id` INTEGER,
-        `attribute` INTEGER NOT NULL,
-        `hotCueBankList_id_parent` INTEGER
-    )""",
-    """CREATE TABLE `hotCueBankList_cue`(
-        `hotCueBankList_id` INTEGER NOT NULL,
-        `cue_id` INTEGER NOT NULL,
-        `sequenceNo` INTEGER NOT NULL,
-        PRIMARY KEY(`hotCueBankList_id`, `cue_id`)
-    )""",
-    """CREATE TABLE `image`(
-        `image_id` INTEGER PRIMARY KEY,
-        `path` TEXT NOT NULL
-    )""",
-    """CREATE TABLE `key`(
-        `key_id` INTEGER PRIMARY KEY,
-        `name` TEXT NOT NULL
-    )""",
-    """CREATE TABLE `label`(
-        `label_id` INTEGER PRIMARY KEY,
-        `name` TEXT NOT NULL
-    )""",
-    """CREATE TABLE `menuItem`(
-        `menuItem_id` INTEGER PRIMARY KEY,
-        `kind` INTEGER NOT NULL,
-        `name` TEXT NOT NULL
-    )""",
-    """CREATE TABLE `myTag`(
-        `myTag_id` INTEGER PRIMARY KEY,
-        `sequenceNo` INTEGER NOT NULL,
-        `name` TEXT NOT NULL,
-        `attribute` INTEGER NOT NULL,
-        `myTag_id_parent` INTEGER NOT NULL
-    )""",
-    """CREATE TABLE `myTag_content`(
-        `myTag_id` INTEGER NOT NULL,
-        `content_id` INTEGER NOT NULL,
-        PRIMARY KEY(`myTag_id`, `content_id`)
-    )""",
-    """CREATE TABLE `playlist`(
-        `playlist_id` INTEGER PRIMARY KEY,
-        `sequenceNo` INTEGER NOT NULL,
-        `name` TEXT NOT NULL,
-        `image_id` INTEGER,
-        `attribute` INTEGER NOT NULL,
-        `playlist_id_parent` INTEGER NOT NULL
-    )""",
-    """CREATE TABLE `playlist_content`(
-        `playlist_id` INTEGER NOT NULL,
-        `content_id` INTEGER NOT NULL,
-        `sequenceNo` INTEGER NOT NULL,
-        PRIMARY KEY(`playlist_id`, `content_id`)
-    )""",
-    """CREATE TABLE `property`(
-        `deviceName` TEXT NOT NULL,
-        `dbVersion` TEXT NOT NULL,
-        `numberOfContents` INTEGER NOT NULL,
-        `createdDate` TEXT NOT NULL,
-        `backGroundColorType` INTEGER NOT NULL,
-        `myTagMasterDBID` INTEGER NOT NULL
-    )""",
-    """CREATE TABLE `recommendedLike`(
-        `content_id_1` INTEGER NOT NULL,
-        `content_id_2` INTEGER NOT NULL,
-        `rating` INTEGER NOT NULL,
-        `createdDate` TEXT NOT NULL,
-        PRIMARY KEY(`content_id_1`, `content_id_2`)
-    )""",
-    """CREATE TABLE `sort`(
-        `sort_id` INTEGER PRIMARY KEY,
-        `menuItem_id` INTEGER NOT NULL,
-        `sequenceNo` INTEGER NOT NULL,
-        `isVisible` INTEGER NOT NULL,
-        `isSelectedAsSubColumn` INTEGER NOT NULL
-    )""",
+    "CREATE TABLE album(album_id integer primary key, name varchar, artist_id integer, image_id integer, isComplation integer, nameForSearch varchar)",
+    "CREATE TABLE artist(artist_id integer primary key, name varchar, nameForSearch varchar)",
+    "CREATE TABLE category(category_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer)",
+    "CREATE TABLE color(color_id integer primary key, name varchar)",
+    "CREATE TABLE content(content_id integer primary key, title varchar, titleForSearch varchar, subtitle varchar, bpmx100 integer, length integer, trackNo integer, discNo integer, artist_id_artist integer, artist_id_remixer integer, artist_id_originalArtist integer, artist_id_composer integer, artist_id_lyricist integer, album_id integer, genre_id integer, label_id integer, key_id integer, color_id integer, image_id integer, djComment varchar, rating integer, releaseYear integer, releaseDate varchar, dateCreated varchar, dateAdded varchar, path varchar, fileName varchar, fileSize integer, fileType integer, bitrate integer, bitDepth integer, samplingRate integer, isrc varchar, djPlayCount integer, isHotCueAutoLoadOn integer, isKuvoDeliverStatusOn integer, kuvoDeliveryComment varchar, masterDbId integer, masterContentId integer, analysisDataFilePath varchar, analysedBits integer, contentLink integer, hasModified integer, cueUpdateCount integer, analysisDataUpdateCount integer, informationUpdateCount integer)",
+    "CREATE TABLE cue(cue_id integer primary key, content_id integer, kind integer, colorTableIndex integer, cueComment varchar, isActiveLoop integer, beatLoopNumerator integer, beatLoopDenominator integer, inUsec integer, outUsec integer, in150FramePerSec integer, out150FramePerSec integer, inMpegFrameNumber integer, outMpegFrameNumber integer, inMpegAbs integer, outMpegAbs integer, inDecodingStartFramePosition integer, outDecodingStartFramePosition integer, inFileOffsetInBlock integer, OutFileOffsetInBlock integer, inNumberOfSampleInBlock integer, outNumberOfSampleInBlock integer)",
+    "CREATE TABLE genre(genre_id integer primary key, name varchar)",
+    "CREATE TABLE history(history_id integer primary key, sequenceNo integer, name varchar, attribute integer, history_id_parent integer)",
+    "CREATE TABLE history_content(history_id integer, content_id integer, sequenceNo integer)",
+    "CREATE TABLE hotCueBankList(hotCueBankList_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, hotCueBankList_id_parent integer)",
+    "CREATE TABLE hotCueBankList_cue(hotCueBankList_id integer, cue_id integer, sequenceNo integer)",
+    "CREATE TABLE image(image_id integer primary key, path varchar)",
+    "CREATE TABLE key(key_id integer primary key, name varchar)",
+    "CREATE TABLE label(label_id integer primary key, name varchar)",
+    "CREATE TABLE menuItem(menuItem_id integer primary key, kind integer, name varchar)",
+    "CREATE TABLE myTag(myTag_id integer primary key, sequenceNo integer, name varchar, attribute integer, myTag_id_parent integer)",
+    "CREATE TABLE myTag_content(myTag_id integer, content_id integer)",
+    "CREATE TABLE playlist(playlist_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, playlist_id_parent integer)",
+    "CREATE TABLE playlist_content(playlist_id integer, content_id integer, sequenceNo integer)",
+    "CREATE TABLE property(deviceName varchar, dbVersion varchar, numberOfContents integer, createdDate varchar, backGroundColorType integer, myTagMasterDBID integer)",
+    "CREATE TABLE recommendedLike(content_id_1 integer, content_id_2 integer, rating integer, createdDate integer)",
+    "CREATE TABLE sort(sort_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer, isSelectedAsSubColumn integer)",
+    "CREATE INDEX index_hotCueBankList_cue_hotCueBankList_id on hotCueBankList_cue(hotCueBankList_id)",
+    "CREATE INDEX index_myTag_content_content_id on myTag_content(content_id)",
+    "CREATE INDEX index_myTag_content_myTag_id on myTag_content(myTag_id)",
+    "CREATE INDEX index_playlist_content_playlist_id on playlist_content(playlist_id)",
 ]
 
 # Fixed reference/lookup data that a real rekordbox export seeds into every
@@ -435,19 +272,31 @@ class DLPWriter:
     ) -> int:
         cur = self.con.cursor()
         file_type = FILE_TYPE.get(ext.lstrip('.').lower(), 0)
+        # Defaults below mirror what a real rekordbox export writes: it fills
+        # numeric/text fields with 0/'' rather than leaving them NULL, and sets
+        # isHotCueAutoLoadOn/isKuvoDeliverStatusOn to 1. titleForSearch is left
+        # NULL exactly as the real export does. The internal cloud-sync ids
+        # (masterDbId, masterContentId, analysedBits, contentLink) are left NULL
+        # -- their generation algorithm is unknown and they aren't needed for
+        # standalone playback; NULL is a valid value for those nullable columns.
         cur.execute(
             """INSERT INTO `content` (
-                title, titleForSearch, artist_id_artist, artist_id_remixer, album_id, genre_id,
-                label_id, key_id, color_id, image_id, djComment, rating, releaseYear,
-                dateCreated, dateAdded, path, fileName, fileSize, fileType, bitrate,
-                samplingRate, isrc, isHotCueAutoLoadOn, analysisDataFilePath, bpmx100, length
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                title, titleForSearch, subtitle, bpmx100, length, trackNo, discNo,
+                artist_id_artist, artist_id_remixer, artist_id_lyricist,
+                album_id, genre_id, label_id, key_id, color_id, image_id,
+                djComment, rating, releaseYear, releaseDate, dateCreated, dateAdded,
+                path, fileName, fileSize, fileType, bitrate, bitDepth, samplingRate,
+                isrc, djPlayCount, isHotCueAutoLoadOn, isKuvoDeliverStatusOn,
+                kuvoDeliveryComment, analysisDataFilePath, hasModified
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                title, title, artist_id, remixer_id, album_id, genre_id,
-                label_id, key_id, color_id, image_id, comment, rating, year,
-                date_added, date_added, path, file_name, file_size, file_type, bitrate,
-                44100, isrc, 0, analysis_path,
-                int(round(bpm * 100)) if bpm else None, duration_s,
+                title, None, "", int(round(bpm * 100)) if bpm else 0, duration_s or 0, 0, 0,
+                artist_id, remixer_id, 0,
+                album_id, genre_id, label_id, key_id, color_id if color_id is not None else 0, image_id,
+                comment or "", rating or 0, year or 0, "", date_added, date_added,
+                path, file_name, file_size, file_type, bitrate, 16, 44100,
+                isrc or "", 0, 1, 1,
+                "", analysis_path, 0,
             ),
         )
         self._track_count += 1
