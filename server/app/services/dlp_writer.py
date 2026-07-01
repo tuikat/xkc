@@ -273,9 +273,17 @@ class DLPWriter:
     def __init__(self, path: str, device_name: str = "XKC"):
         from sqlcipher3 import dbapi2 as sqlite3
         Path(path).unlink(missing_ok=True)
+        Path(path + "-wal").unlink(missing_ok=True)
+        Path(path + "-shm").unlink(missing_ok=True)
+        self._path = path
         self.con = sqlite3.connect(path)
         cur = self.con.cursor()
         cur.execute(f"PRAGMA key = '{DLP_KEY}';")
+        # Real rekordbox-exported libraries are left in WAL journal mode (they ship
+        # with exportLibrary.db-shm/-wal sidecar files). Match that on-disk shape --
+        # some CDJ firmware may sanity-check the journal-mode byte in the SQLite
+        # header and reject a plain rollback-journal file as "not a real export".
+        cur.execute("PRAGMA journal_mode = WAL;")
         for stmt in _SCHEMA_STATEMENTS:
             cur.execute(stmt)
         self.con.commit()
@@ -419,4 +427,20 @@ class DLPWriter:
             (self.device_name, 1, self._track_count, _now_iso(), 0, my_tag_master_dbid),
         )
         self.con.commit()
+
+        # sqlite3_close() runs an implicit final checkpoint that merges and
+        # deletes the -wal/-shm sidecar files. Real rekordbox exports ship with
+        # those files still present (rekordbox never cleanly checkpoints before
+        # the USB is ejected) -- capture their bytes before close and restore
+        # them afterward so the on-disk file set matches a real device exactly.
+        wal_path = self._path + "-wal"
+        shm_path = self._path + "-shm"
+        wal_bytes = Path(wal_path).read_bytes() if Path(wal_path).exists() else None
+        shm_bytes = Path(shm_path).read_bytes() if Path(shm_path).exists() else None
+
         self.con.close()
+
+        if wal_bytes is not None:
+            Path(wal_path).write_bytes(wal_bytes)
+        if shm_bytes is not None:
+            Path(shm_path).write_bytes(shm_bytes)
