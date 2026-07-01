@@ -431,6 +431,11 @@ def build_usb_export(
     pdb_bytes = _build_export_pdb(ordered_tracks, playlists_data, artwork_dir)
     (pioneer_dir / "export.pdb").write_bytes(pdb_bytes)
 
+    # exportExt.pdb -- the companion database a real rekordbox export always
+    # ships alongside export.pdb (preset My-Tag definitions + metadata).
+    from app.services.pdb_writer import build_export_ext_pdb
+    (pioneer_dir / "exportExt.pdb").write_bytes(build_export_ext_pdb())
+
     # Also write exportLibrary.db (Device Library Plus / OneLibrary) -- some
     # newer firmware (including some CDJ-3000 versions) requires this and
     # won't fall back to export.pdb if it's missing. This is new and less

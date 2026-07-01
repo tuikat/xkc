@@ -34,13 +34,140 @@ PAGE_TYPE_KEYS = 5
 PAGE_TYPE_COLORS = 6
 PAGE_TYPE_PLAYLIST_TREE = 7
 PAGE_TYPE_PLAYLIST_ENTRIES = 8
+PAGE_TYPE_UNKNOWN_9 = 9
+PAGE_TYPE_UNKNOWN_10 = 10
+PAGE_TYPE_HISTORY_PLAYLISTS = 11
+PAGE_TYPE_HISTORY_ENTRIES = 12
 PAGE_TYPE_ARTWORK = 13
+PAGE_TYPE_UNKNOWN_14 = 14
+PAGE_TYPE_UNKNOWN_15 = 15
+PAGE_TYPE_COLUMNS = 16
+PAGE_TYPE_UNKNOWN_17 = 17
+PAGE_TYPE_UNKNOWN_18 = 18
+PAGE_TYPE_HISTORY = 19
 
-_TABLE_ORDER = [
-    PAGE_TYPE_TRACKS, PAGE_TYPE_GENRES, PAGE_TYPE_ARTISTS, PAGE_TYPE_ALBUMS,
-    PAGE_TYPE_LABELS, PAGE_TYPE_KEYS, PAGE_TYPE_COLORS,
-    PAGE_TYPE_PLAYLIST_TREE, PAGE_TYPE_PLAYLIST_ENTRIES, PAGE_TYPE_ARTWORK,
-]
+# A real rekordbox export.pdb declares ALL 20 table types in its header (0-19),
+# each with at least one allocated page even when empty. Emitting only a subset
+# is a self-inconsistency rekordbox's re-parser rejects as "device library
+# corrupted" and CDJs read as "database not found". We declare all 20 in order.
+_TABLE_ORDER = list(range(20))
+
+# Fixed reference tables copied verbatim from a real rekordbox 7.2.7 export.pdb.
+# These are identical in every export (independent of library content): the 8
+# standard track colors (6), the browsable metadata columns (16, the CDJ browse
+# menu with U+FFFA/U+FFFB-wrapped localized names), two browse-config tables
+# (17, 18), and a history/property row (19). Copied as opaque bytes because
+# their exact row layout is not in the public spec -- verbatim real bytes are
+# guaranteed correct.
+_FIXED_REFERENCE_ROWS = {
+    6: [
+        bytes.fromhex('00000000010100000b50696e6b000000'),
+        bytes.fromhex('000000000202000009526564'),
+        bytes.fromhex('00000000030300000f4f72616e676500'),
+        bytes.fromhex('00000000040400000f59656c6c6f7700'),
+        bytes.fromhex('00000000050500000d477265656e0000'),
+        bytes.fromhex('00000000060600000b41717561000000'),
+        bytes.fromhex('00000000070700000b426c7565000000'),
+        bytes.fromhex('00000000080800000f507572706c6500'),
+    ],
+    16: [
+        bytes.fromhex('0100800090120000faff470045004e0052004500fbff0000'),
+        bytes.fromhex('0200810090140000faff410052005400490053005400fbff'),
+        bytes.fromhex('0300820090120000faff41004c00420055004d00fbff0000'),
+        bytes.fromhex('0400830090120000faff54005200410043004b00fbff0000'),
+        bytes.fromhex('05008500900e0000faff420050004d00fbff0000'),
+        bytes.fromhex('0600860090140000faff52004100540049004e004700fbff'),
+        bytes.fromhex('0700870090100000faff5900450041005200fbff'),
+        bytes.fromhex('0800880090160000faff520045004d004900580045005200fbff0000'),
+        bytes.fromhex('0900890090120000faff4c004100420045004c00fbff0000'),
+        bytes.fromhex('0a008a0090260000faff4f0052004900470049004e0041004c002000410052005400490053005400fbff0000'),
+        bytes.fromhex('0b008b00900e0000faff4b0045005900fbff0000'),
+        bytes.fromhex('0c008d00900e0000faff430055004500fbff0000'),
+        bytes.fromhex('0d008e0090120000faff43004f004c004f005200fbff0000'),
+        bytes.fromhex('0e00920090100000faff540049004d004500fbff'),
+        bytes.fromhex('0f00930090160000faff4200490054005200410054004500fbff0000'),
+        bytes.fromhex('10009400901a0000faff460049004c00450020004e0041004d004500fbff0000'),
+        bytes.fromhex('1100840090180000faff50004c00410059004c00490053005400fbff'),
+        bytes.fromhex('1200980090200000faff48004f00540020004300550045002000420041004e004b00fbff'),
+        bytes.fromhex('1300950090160000faff48004900530054004f0052005900fbff0000'),
+        bytes.fromhex('1400910090140000faff530045004100520043004800fbff'),
+        bytes.fromhex('1500960090180000faff43004f004d004d0045004e0054005300fbff'),
+        bytes.fromhex('16008c00901c0000faff4400410054004500200041004400440045004400fbff'),
+        bytes.fromhex('1700970090220000faff44004a00200050004c0041005900200043004f0055004e005400fbff0000'),
+        bytes.fromhex('1800900090140000faff46004f004c00440045005200fbff'),
+        bytes.fromhex('1900a10090160000faff440045004600410055004c005400fbff0000'),
+        bytes.fromhex('1a00a20090180000faff41004c00500048004100420045005400fbff'),
+        bytes.fromhex('1b00aa0090180000faff4d00410054004300480049004e004700fbff'),
+    ],
+    17: [
+        bytes.fromhex('0f00140006010000'), bytes.fromhex('1000150063010000'),
+        bytes.fromhex('1200170063010000'), bytes.fromhex('0800090063010000'),
+        bytes.fromhex('09000a0063010000'), bytes.fromhex('0a000b0063010000'),
+        bytes.fromhex('0d000f0063010000'), bytes.fromhex('0e00130004010000'),
+        bytes.fromhex('0100010063010000'), bytes.fromhex('0500060005010000'),
+        bytes.fromhex('0600070063010000'), bytes.fromhex('0700080063010000'),
+        bytes.fromhex('0200020002000100'), bytes.fromhex('0300030003000200'),
+        bytes.fromhex('0400040001000300'), bytes.fromhex('0b000c0063000400'),
+        bytes.fromhex('1100050063000500'), bytes.fromhex('1300160063000600'),
+        bytes.fromhex('1400120063000700'), bytes.fromhex('1b001a0063020800'),
+        bytes.fromhex('1800110063000900'), bytes.fromhex('16001b0063050a00'),
+    ],
+    18: [
+        bytes.fromhex('1600110001000000'), bytes.fromhex('0e00080001000000'),
+        bytes.fromhex('0800090001000000'), bytes.fromhex('09000a0001000000'),
+        bytes.fromhex('0a000b0001000000'), bytes.fromhex('0f000d0001000000'),
+        bytes.fromhex('0d000f0001000000'), bytes.fromhex('1700100001000000'),
+        bytes.fromhex('0100060001000000'), bytes.fromhex('1500070001000000'),
+        bytes.fromhex('1900000000010000'), bytes.fromhex('1a00010000020000'),
+        bytes.fromhex('0200020000030000'), bytes.fromhex('0300030000040000'),
+        bytes.fromhex('0500040000050000'), bytes.fromhex('0600050000060000'),
+        bytes.fromhex('0b000c0000070000'),
+    ],
+    19: [
+        bytes.fromhex('8002c000020000000000000017323032362d30372d3031191e0b3130303003000000000000000000'),
+    ],
+}
+
+# exportExt.pdb is a separate, smaller DeviceSQL file (9 table types) that a real
+# rekordbox export ships alongside export.pdb. Its only populated tables are the
+# 28 preset My-Tag definitions (type 3) and one metadata row (type 7) -- both
+# fixed reference data, copied verbatim from a real exportExt.pdb.
+_EXT_TABLE_ORDER = list(range(9))
+_EXT_FIXED_REFERENCE_ROWS = {
+    3: [
+        bytes.fromhex('80060000000000000000000000000000000000000100000000000001031f250d47656e72650300000000000000000000'),
+        bytes.fromhex('8006200000000000000000000100000000000000bc09ecb400000000031f2a174163696420486f75736503000000000000000000'),
+        bytes.fromhex('8006400000000000000000000100000001000000c5a9ba2800000000031f2a174465657020486f75736503000000000000000000'),
+        bytes.fromhex('8006600000000000000000000100000002000000d1363a6800000000031f260f546563686e6f03000000000000000000'),
+        bytes.fromhex('80068000000000000000000001000000030000000b6d07dc00000000031f28134e7520446973636f030000000000000000000000'),
+        bytes.fromhex('8006a00000000000000000000100000004000000a6c8805c00000000031f2d1d456c656374726f20486f7573650300000000000000000000'),
+        bytes.fromhex('8006c0000000000000000000010000000500000090761c4b00000000031f2a1742617373204d7573696303000000000000000000'),
+        bytes.fromhex('8006e000000000000000000001000000060000001bd9da0100000000031f240b54726170030000000000000000000000'),
+        bytes.fromhex('80060001000000000000000000000000010000000200000000000001031f2a17436f6d706f6e656e747303000000000000000000'),
+        bytes.fromhex('80062001000000000000000002000000000000006b40f09800000000031f250d53796e74680300000000000000000000'),
+        bytes.fromhex('80064001000000000000000002000000010000003dfe642200000000031f250d566f63616c0300000000000000000000'),
+        bytes.fromhex('8006600100000000000000000200000002000000fde1511200000000031f240b42656174030000000000000000000000'),
+        bytes.fromhex('80068001000000000000000002000000030000009fdb494400000000031f28135375622042617373030000000000000000000000'),
+        bytes.fromhex('8006a00100000000000000000200000004000000cc5c095d00000000031f2a1750657263757373696f6e03000000000000000000'),
+        bytes.fromhex('8006c00100000000000000000200000005000000d883b1e000000000031f250d5069616e6f0300000000000000000000'),
+        bytes.fromhex('8006e00100000000000000000200000006000000d38636f700000000031f240b4461726b030000000000000000000000'),
+        bytes.fromhex('8006000200000000000000000200000007000000870fb49e00000000031f250d55707065720300000000000000000000'),
+        bytes.fromhex('80062002000000000000000000000000020000000300000000000001031f2915536974756174696f6e0300000000000000000000'),
+        bytes.fromhex('8006400200000000000000000300000000000000f94978cb00000000031f2a174d61696e20466c6f6f7203000000000000000000'),
+        bytes.fromhex('80066002000000000000000003000000010000005e00546a00000000031f2c1b5365636f6e6420466c6f6f72030000000000000000000000'),
+        bytes.fromhex('800680020000000000000000030000000200000084b1e80d00000000031f260f4c6f756e676503000000000000000000'),
+        bytes.fromhex('8006a002000000000000000003000000030000003117e11b00000000031f29154d6964204e696768740300000000000000000000'),
+        bytes.fromhex('8006c0020000000000000000030000000400000030cdd8ba00000000031f27114d6f726e696e67030000000000000000'),
+        bytes.fromhex('8006e002000000000000000003000000050000008fd3eb4300000000031f28134275696c64207570030000000000000000000000'),
+        bytes.fromhex('8006000300000000000000000300000006000000586775f700000000031f29155065616b2054696d650300000000000000000000'),
+        bytes.fromhex('800620030000000000000000030000000700000096367a6c00000000031f2a174275696c6420646f776e03000000000000000000'),
+        bytes.fromhex('80064003000000000000000000000000030000000400000000000001031f2f21556e7469746c656420436f6c756d6e030000000000000000'),
+        bytes.fromhex('80066003000000000000000004000000000000001facd0bb00000000031f2a174d7920436f6d6d656e7403000000000000000000'),
+    ],
+    7: [
+        bytes.fromhex('000700000000000000000000000000000000000000000000b5ac012e0322232425260303030303000000000000000000000000000000000000000000'),
+    ],
+}
 
 
 def encode_device_sql_string(s: Optional[str]) -> bytes:
@@ -141,9 +268,18 @@ class _Table:
 
 
 class PdbWriter:
-    def __init__(self):
-        self._tables: Dict[int, _Table] = {pt: _Table(pt) for pt in _TABLE_ORDER}
+    def __init__(self, table_order: Optional[List[int]] = None,
+                 fixed_rows: Optional[Dict[int, List[bytes]]] = None):
+        self._table_order = table_order if table_order is not None else _TABLE_ORDER
+        self._tables: Dict[int, _Table] = {pt: _Table(pt) for pt in self._table_order}
         self._sequence = 1
+        # Seed the fixed reference tables (colors + browse menu + history) that a
+        # real export always carries. Track/artist/etc. rows are added later by
+        # the caller on top of these.
+        seed = fixed_rows if fixed_rows is not None else _FIXED_REFERENCE_ROWS
+        for page_type, rows in seed.items():
+            for row in rows:
+                self._tables[page_type].add_row(row)
 
     def add_row(self, page_type: int, row_bytes: bytes):
         self._tables[page_type].add_row(row_bytes)
@@ -151,7 +287,7 @@ class PdbWriter:
     def build(self) -> bytes:
         next_index = 1  # page 0 is the file header/table-of-contents page
         table_page_indices: Dict[int, List[int]] = {}
-        for pt in _TABLE_ORDER:
+        for pt in self._table_order:
             pages = self._tables[pt].pages
             indices = list(range(next_index, next_index + len(pages)))
             table_page_indices[pt] = indices
@@ -159,7 +295,7 @@ class PdbWriter:
         total_pages = next_index
 
         rendered: Dict[int, bytes] = {}
-        for pt in _TABLE_ORDER:
+        for pt in self._table_order:
             pages = self._tables[pt].pages
             indices = table_page_indices[pt]
             for i, page in enumerate(pages):
@@ -169,9 +305,9 @@ class PdbWriter:
 
         header = bytearray(PAGE_SIZE)
         struct.pack_into('<4xIIIII4x', header, 0,
-                          PAGE_SIZE, len(_TABLE_ORDER), total_pages, 0, self._sequence)
+                          PAGE_SIZE, len(self._table_order), total_pages, 0, self._sequence)
         pos = 28
-        for pt in _TABLE_ORDER:
+        for pt in self._table_order:
             indices = table_page_indices[pt]
             struct.pack_into('<IIII', header, pos, pt, 0, indices[0], indices[-1])
             pos += 16
@@ -180,6 +316,15 @@ class PdbWriter:
         for page_index in range(1, total_pages):
             out += rendered[page_index]
         return bytes(out)
+
+
+def build_export_ext_pdb() -> bytes:
+    """Build exportExt.pdb -- the 9-table companion file a real rekordbox export
+    ships next to export.pdb. Only the fixed preset My-Tag definitions and one
+    metadata row are populated (verbatim from a real export); the rest are the
+    empty tables rekordbox still declares."""
+    return PdbWriter(table_order=_EXT_TABLE_ORDER,
+                     fixed_rows=_EXT_FIXED_REFERENCE_ROWS).build()
 
 
 # --- Row encoders -----------------------------------------------------------
